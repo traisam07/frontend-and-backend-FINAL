@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="PulseMind">
+  <title>PulseMind</title>
+  <!--
+    The tab mark. Authored here from the same pulse the loading indicator draws (**D-31**), NOT cut
+    from the supplied wordmark — a wide logotype is illegible at 16px, and no square crop was
+    supplied (**D-32** asks for one).
+
+    Until 2026-08-19 `app.html` linked this path and NOTHING WAS HERE: the icon 404'd on every page
+    load, while a stock Svelte logo sat unused in `src/lib/assets/`. Both are fixed together.
+
+    Deliberately simplified to a single spike. The full P-QRS-T trace the loader draws turns to mud
+    below about 24px, and a favicon is read at 16.
+
+    No background rectangle: the brand red carries on light and dark tab strips alike, and a white
+    plate would be a white slab in a dark browser chrome.
+
+    The colour is the literal brand red rather than a token, because a static file in `static/` is
+    never processed by the stylesheet — it is the one place in this project where the hex is correct
+    rather than a rule-7 violation. It must stay in step with `--color-brand-solid`.
+  -->
+  <path
+    d="M2.5 16 H9 l3.6 -9.5 l5.2 19 l3.6 -9.5 H29.5"
+    fill="none"
+    stroke="#CD082D"
+    stroke-width="3.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

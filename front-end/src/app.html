@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%sveltekit.assets%/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="text-scale" content="scale" />
+    <meta
+      name="description"
+      content="PulseMind — ICU respiratory-risk decision support. Read-only clinical review UI."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <!--
+			Theme resolution runs SYNCHRONOUSLY and BEFORE SvelteKit's head placeholder below, so the
+			first paint is already the right theme. Doing this in an $effect or onMount paints
+			light-then-dark on every reload, which on a 03:00 ICU workstation is a flash of
+			full-brightness white in a darkened room.
+
+			NOTE: this comment deliberately does NOT spell the placeholder token out. SvelteKit
+			replaces the FIRST occurrence of it in this file — so a mention inside a comment consumes
+			the substitution, and the real placeholder further down survives into the DOM and renders
+			as visible text at the top of every page.
+
+			The catch branch resolves to an EXPLICIT theme; `data-theme` is never left unset, because
+			the stylesheet's dark blocks are keyed on it and an unset attribute would leave the
+			toggle and the OS preference able to disagree.
+
+			Where the choice persists is a product decision — localStorage per workstation is a
+			harness placeholder, pending design confirmation (open question D-03).
+		-->
+    <script>
+      (function () {
+        try {
+          var root = document.documentElement;
+          var stored = localStorage.getItem('pm-theme'); // 'light' | 'dark' | null (= system)
+          var resolved =
+            stored ||
+            (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          root.setAttribute('data-theme', resolved);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+    <!--
+			Keyframes for the boot mark below. Inline because `app.css` has not loaded at first paint —
+			an external rule would arrive after the very window this block exists to fill. Scoped to one
+			id so it cannot leak into the app's own styles once they do load.
+		-->
+    <style>
+      /* The boot mark's reduced-motion swap. Inline because `app.css` has not loaded at first paint
+			   — an external rule would arrive after the very window this block exists to fill. A GIF
+			   ignores every motion preference, so the ONLY way to honour one is to show a different
+			   file; the still frame is generated from the GIF by `scripts/build-brand.mjs`. */
+      #pm-boot-still {
+        display: none;
+      }
+      /* THE ELLIPSIS ANIMATES; THE WORD DOES NOT. The dots are always present and fade between
+			   full and low opacity rather than appearing one by one, so the label never changes width
+			   and never nudges the text beside it. */
+      #pm-boot-dots span {
+        animation: pm-boot-dots 1.4s ease-in-out infinite;
+      }
+      #pm-boot-dots span:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+      #pm-boot-dots span:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+      @keyframes pm-boot-dots {
+        0%,
+        60%,
+        100% {
+          opacity: 0.25;
+        }
+        30% {
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #pm-boot-moving {
+          display: none;
+        }
+        #pm-boot-still {
+          display: block;
+        }
+        /* A static, fully-visible ellipsis rather than one frozen at its faded keyframe. */
+        #pm-boot-dots span {
+          animation: none;
+          opacity: 1;
+        }
+      }
+    </style>
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <!--
+			STATE U-01, the INITIAL loading treatment.
+
+			`export const ssr = false` means the served document carries no application markup at all,
+			so without this the first paint is a blank white page — the "looks like nothing is wrong"
+			outcome U-01 exists to prevent, and the one a clinician is most likely to meet on a cold
+			workstation. This static block is what fills that window; the root layout removes it in
+			`onMount`, which is the moment the app can render its own states.
+
+			It says, in words, that no assessment is on screen. It renders no zero, no dash, no empty
+			card and nothing a clinician could read as "no patients at risk".
+		-->
+    <div
+      id="pm-boot"
+      role="status"
+      style="
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: var(--color-canvas, #f3f5f7);
+        color: var(--color-fg-secondary, #4d535e);
+      "
+    >
+      <!--
+				THE SUPPLIED LOADING MARK, IN PLACE OF THE WORDMARK TEXT.
+
+				The SAME two files `$lib/components/PulseLoader.svelte` renders, referenced by path
+				rather than imported: this block paints before any JavaScript module or stylesheet has
+				loaded, so it cannot import a component and cannot use a Tailwind utility. One path
+				means one download and no way for the boot mark and the app mark to drift.
+				`src/boot-loader.test.ts` fails the build if they stop matching.
+
+				A GIF CANNOT BE PAUSED — no CSS property and no attribute stops one — so
+				`prefers-reduced-motion` is honoured the only way it can be: by swapping to the still
+				frame `scripts/build-brand.mjs` extracts from it.
+
+				The sentence below is NOT decoration and must not be removed: `U-01` mandates an
+				indicator PLUS text, and the text is what states that no assessment is on screen.
+			-->
+      <img
+        id="pm-boot-moving"
+        src="%sveltekit.assets%/images/animation.gif"
+        alt="PulseMind"
+        width="56"
+        height="56"
+      />
+      <img
+        id="pm-boot-still"
+        src="%sveltekit.assets%/images/animation-still.png"
+        alt="PulseMind"
+        width="56"
+        height="56"
+      />
+      <!--
+				THE VISIBLE LABEL. `aria-hidden`, because the sentence below it is what the `role="status"`
+				region announces — without that, a screen reader would read `Loading` twice.
+			-->
+      <p id="pm-boot-label" aria-hidden="true" style="margin: 0">
+        Loading<span id="pm-boot-dots"><span>.</span><span>.</span><span>.</span></span>
+      </p>
+      <!--
+				SCREEN-READER ONLY, at the product owner's instruction on 2026-08-19: the visible sentence
+				is gone and the mark carries the screen on its own (**D-31**).
+
+				IT IS NOT DELETED, and that is not a hedge. This block is `role="status"`; a status region
+				with no text content announces NOTHING, so removing the words outright would leave a
+				blind clinician on a silent screen with no way to know the app is still working. WCAG
+				2.2 SC 4.1.3. The visual request and the accessible name are separable, and this keeps
+				the half that is not visual.
+
+				The styles are inline because `app.css` has not loaded at first paint, so no `sr-only`
+				utility exists yet.
+			-->
+      <span
+        style="
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+          white-space: nowrap;
+          border: 0;
+        "
+        >Loading — no assessment is being displayed yet.</span
+      >
+    </div>
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>

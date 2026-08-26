@@ -1,0 +1,31 @@
+{
+  "extends": "./.svelte-kit/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true,
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "moduleResolution": "bundler"
+  }
+  // `strict` and `noUncheckedIndexedAccess` are the two that earn their keep, and neither may be
+  // relaxed to make something compile. `noUncheckedIndexedAccess` makes `readings[0]` a
+  // `Reading | undefined`, which is what forces the F-1 latest-reading rule to be handled instead
+  // of assumed — and it works only because absence is representable in the post-validation domain
+  // types. Five fields are nullable there (`risk_level`, `sufficient_data`, `source`, `charttime`,
+  // `risk_score`), so the compiler forces the S-05 / S-10 / S-15 / U-11 / S-35 branches rather
+  // than letting a `risk_level ?? 'Low'` through.
+  //
+  // Path aliases are handled by SvelteKit; do not add `paths` here.
+  // Do not edit `.svelte-kit/tsconfig.json` — it is generated.
+}
