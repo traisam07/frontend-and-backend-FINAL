@@ -504,7 +504,20 @@ instant. Do not reach for `!` or `as` to make the sort compile — under
 `"strict": true` + `"noUncheckedIndexedAccess": true` those two operators are exactly how the
 `U-11` branch gets deleted by accident.
 
-### F-2. 60-minute risk history window (PD-4, OV-5)
+### F-2. Risk history window, 24 hours (PD-4, OV-5)
+
+⚠️ **The width was 60 minutes until 2026-08-28.** It is one constant, `RISK_WINDOW_MINUTES` in
+`$lib/domain/window`, and every rendered string reads it rather than spelling a duration of its own.
+
+The live PulseMind pipeline advances the ward one HOUR per reading, and that interval is not
+adjustable: the band table's dwell clock is denominated on the same grid, its demote dwell is 120
+minutes, and the published band trajectory was verified against it. A 60-minute window therefore
+admitted the latest reading and, at the boundary, one more. A section the handoff names on two
+screens plotted a single line segment and otherwise rendered its insufficient-history literal, on
+every patient, permanently.
+
+The fixture set is unaffected in behaviour: its patients carry 2 to 5 readings with every gap under
+an hour, so the same points plot at either width. Only the rendered literal changed there.
 
 - **Anchor** = the latest reading's `charttime`, **not** the browser wall clock. Anchoring on the
   wall clock would silently empty the chart when data is stale, which reads as "nothing happening".
@@ -525,7 +538,7 @@ instant. Do not reach for `!` or `as` to make the sort compile — under
   projection past the last point.
 - Gaps `[HARNESS]`: a gap larger than 2x the median inter-reading interval renders as a **visible
   break**, not as a straight connecting segment.
-- Fewer than two points in the window -> explicit "insufficient history for a 60-minute view". Never
+- Fewer than two points in the window -> explicit "insufficient history for a 24-hour view". Never
   draw a single point as a flat line.
 - Points whose reading is `insufficient` are marked distinctly in the series `[HARNESS]`.
 - ~~The y-axis domain is **not** fixed to 0–100.~~ **OVERRIDDEN 2026-08-23** on the product owner's
@@ -544,7 +557,7 @@ Not in the schema. Derived from consecutive `readings[].risk_level`. The slot is
 `docs/spec/ui-states.md`, which carries all three of its mandated literals; this section is the
 derivation, that row is the copy.
 
-1. Take the **full** readings array ascending by `charttime` (F-1), not the 60-minute window.
+1. Take the **full** readings array ascending by `charttime` (F-1), not the risk-history window.
 2. Let `L = latest.risk_level`. **`L` is `RiskLevel | null`, so test it first: if `L === null` the
    result is `unavailable` and the walk never starts** (step 4). Otherwise walk **backwards** from
    the latest reading, counting while `risk_level === L`. Stop at the first different or missing
@@ -700,7 +713,7 @@ fragility is measurable, and retire the whole mechanism the moment **G-04** land
 - Series = for each reading in the window, the entry in `parameters[]` whose name matches the active
   parameter -> `{ t: charttime, value, source, last_measured }`. Readings lacking that parameter
   produce **gaps**, never `0` and never an interpolated point.
-- Window `[HARNESS]`: reuse the same anchored 60-minute window as F-2 for consistency; the handoff
+- Window `[HARNESS]`: reuse the same anchored 24-hour window as F-2 for consistency; the handoff
   says only "the recent time window" for this chart.
 - Points are visually distinguished by `source`, with a non-colour channel as well `[HARNESS]`
   (Handoff section 9: keep provenance visibly distinct). `source` is `Provenance | null`, so
@@ -1142,7 +1155,7 @@ object literal, so it carries no `_id` and no `__v`.
 - [ ] `readings` is never indexed without the F-1 sort.
 - [ ] `pnpm check` passes with `strict` and `noUncheckedIndexedAccess` on. Neither flag is relaxed
       to make a snippet compile.
-- [ ] The 60-minute window is anchored on `charttime`, not `Date.now()`.
+- [ ] The risk-history window is anchored on `charttime`, not `Date.now()`.
 - [ ] No `Math.abs()` or re-normalisation of `contribution`.
 - [ ] No `%`, no `x100`, no bar for `imputed_share` / `documentation_share`.
 - [ ] `available` is never emitted from a `top_contributors` miss.

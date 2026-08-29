@@ -127,24 +127,35 @@ function parseInstant(
   return instant;
 }
 
-function parseRiskLevel(raw: unknown, warnings: string[]): RiskLevel | null {
+function parseRiskLevel(
+  raw: unknown,
+  at: string,
+  refused: boolean,
+  warnings: string[],
+): RiskLevel | null {
   if (raw === 'Critical' || raw === 'High' || raw === 'Medium' || raw === 'Low') return raw;
   // No case-folding here, deliberately: section 2.3 accepts ONLY the four literals, so "critical"
   // is an unrecognised value and not a spelling variant. Case-folding is prescribed for exactly two
   // joins — `warning_status.status` and the model-use name match — and nowhere else.
-  warnings.push(
-    isAbsent(raw) ? 'Missing risk_level' : `Unrecognised risk_level: ${JSON.stringify(raw)}`,
-  );
+  //
+  // AN ABSENT LEVEL ON A REFUSED READING IS NOT AN INTEGRITY PROBLEM. See `parseScore`.
+  if (!(refused && isAbsent(raw))) {
+    warnings.push(
+      isAbsent(raw)
+        ? `Missing ${at}.risk_level`
+        : `Unrecognised ${at}.risk_level: ${JSON.stringify(raw)}`,
+    );
+  }
   return null; // S-05. Never 'Low'.
 }
 
 /** Wire spelling is fixed in `docs/spec/data-contract.md` section 2.3; anything else is S-10. */
-function parseSufficiency(raw: unknown, warnings: string[]): Sufficiency | null {
+function parseSufficiency(raw: unknown, at: string, warnings: string[]): Sufficiency | null {
   if (raw === 'sufficient' || raw === 'insufficient') return raw;
   warnings.push(
     isAbsent(raw)
-      ? 'Missing sufficient_data'
-      : `Unrecognised sufficient_data: ${JSON.stringify(raw)}`,
+      ? `Missing ${at}.sufficient_data`
+      : `Unrecognised ${at}.sufficient_data: ${JSON.stringify(raw)}`,
   );
   return null; // S-10. Never gates as 'sufficient'.
 }
@@ -154,11 +165,34 @@ function parseSufficiency(raw: unknown, warnings: string[]): Sufficiency | null 
  * integrity warning; it never rejects the patient, because dropping a patient over one bad field is
  * forbidden and because the "score unavailable" state (S-35) has to be reachable. Never `?? 0`.
  */
-function parseScore(raw: unknown, warnings: string[]): number | null {
+/**
+ * ⚠️ THE WARNING NAMES ITS READING, and that is not cosmetic.
+ *
+ * `IntegrityWarnings` keys its `{#each}` by the warning TEXT, on the stated assumption that these
+ * are "distinct strings naming distinct paths". `Missing risk_score` named no path, so a patient
+ * whose readings all lack a score produced the same string once per reading, and Svelte threw
+ * `each_key_duplicate`. No `+error.svelte` catches a RENDER failure, so Patient Detail went blank
+ * with no named state, which is the incident CLAUDE.md rule 4 exists to prevent. Seen live on the
+ * bed that refuses on every reading: 24 readings, 24 identical keys, a white screen.
+ *
+ * ⚠️ AND AN ABSENT SCORE ON A REFUSED READING IS NOT AN INTEGRITY PROBLEM AT ALL. When
+ * `sufficient_data` is `insufficient` the contract REQUIRES no score: the reading fell below the
+ * data-sufficiency floor and the model declined to publish one. Warning about it reports the
+ * system working correctly as a fault, and a banner that cries wolf twenty-four times is a banner
+ * nobody reads the twenty-fifth time. The state is already stated, prominently, by S-10.
+ *
+ * An UNRECOGNISED score still warns on a refused reading: a value that is present and unusable is
+ * a real contradiction whatever the sufficiency says.
+ */
+function parseScore(raw: unknown, at: string, refused: boolean, warnings: string[]): number | null {
   if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
-  warnings.push(
-    isAbsent(raw) ? 'Missing risk_score' : `Unrecognised risk_score: ${JSON.stringify(raw)}`,
-  );
+  if (!(refused && isAbsent(raw))) {
+    warnings.push(
+      isAbsent(raw)
+        ? `Missing ${at}.risk_score`
+        : `Unrecognised ${at}.risk_score: ${JSON.stringify(raw)}`,
+    );
+  }
   return null; // S-35. Never 0.
 }
 
@@ -222,7 +256,10 @@ function parseCondition(
     warnings.push(`Unrecognised ${at}.catch: ${JSON.stringify(entry.catch)}`);
   }
   // Stored, never used for filtering, sorting or styling until G-10 lands.
-  return { ok: true, value: { name: name.value, catchFlag: entry.catch === true } };
+  return {
+    ok: true,
+    value: { name: name.value, catchFlag: entry.catch === true },
+  };
 }
 
 function parseContributor(
@@ -234,7 +271,10 @@ function parseContributor(
   if (!name.ok) return name;
   const contribution = requireFinite(entry.contribution, `${at}.contribution`);
   if (!contribution.ok) return contribution;
-  return { ok: true, value: { name: name.value, contribution: contribution.value } };
+  return {
+    ok: true,
+    value: { name: name.value, contribution: contribution.value },
+  };
 }
 
 function parseCitation(entry: unknown, at: string): Parsed<{ name: string; claim: string }> {
@@ -311,11 +351,38 @@ function parseParameter(
     source,
     // The one field whose absence carries its reason (F-10). `kind: 'unavailable'`, never 'unknown'.
     lastMeasured: parseLastMeasured(entry.last_measured, at, source, warnings),
+    // **G-01.** A unit the service supplies, trimmed, or null. A non-string is not coerced: an
+    // unlabelled number is recoverable, a wrongly labelled one is not.
+    unit: typeof entry.unit === 'string' && entry.unit.trim() !== '' ? entry.unit.trim() : null,
     // Presence in top_contributors is the ONLY evidence of model use, and the join is exact after
     // trim + case-fold (F-8). Absence proves nothing, so it is `unknown` and never `available`.
-    modelUse: scoreFactors.has(foldName(name.value)) ? 'score_factor' : 'unknown',
+    //
+    // A SOURCE MAY PROVE `score_factor` ON BETTER EVIDENCE THAN A NAME. `feature_name` is a display
+    // label, so the fold-and-compare below is a guess dressed as a join. A source that carries a
+    // real join key can settle it and say so with `model_use: 'score_factor'`; that is read here and
+    // nothing else is. `available` is still never accepted from a source, because proving a
+    // parameter is NOT a factor needs the whole attribution vector and every source so far stores a
+    // truncated top-N (**G-04**).
+    modelUse:
+      entry.model_use === 'score_factor' || scoreFactors.has(foldName(name.value))
+        ? 'score_factor'
+        : 'unknown',
   };
   return { ok: true, value: parameter };
+}
+
+/**
+ * **G-32**. A count the publisher supplies. Absent is silent: most sources do not have one, and the
+ * client-side walk in `heldAtLevel` is the documented fallback. Present-but-unusable warns, because
+ * a source that sends the field and gets it wrong is a different fact from one that does not send it.
+ */
+function parseReadingsInState(raw: unknown, at: string, warnings: string[]): number | null {
+  if (isAbsent(raw)) return null;
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+    warnings.push(`Unrecognised ${at}.readings_in_state: ${JSON.stringify(raw)}`);
+    return null;
+  }
+  return raw;
 }
 
 function parseReading(entry: unknown, at: string, warnings: string[]): Parsed<Reading> {
@@ -354,13 +421,18 @@ function parseReading(entry: unknown, at: string, warnings: string[]): Parsed<Re
     citations = parsed.value;
   }
 
+  // Read BEFORE the score and the level, because it decides whether their ABSENCE is a defect or
+  // the contract being honoured. Parsed once and reused, never parsed twice.
+  const sufficiency = parseSufficiency(entry.sufficient_data, at, warnings);
+  const refused = sufficiency === 'insufficient';
+
   const reading: Reading = {
     // 'warn': F-1 step 2 — a reading with no usable charttime drops out of latest-selection
     // entirely, so its absence has to be visible rather than inferred from a short chart.
     charttime: parseInstant(entry.charttime, `${at}.charttime`, warnings, 'warn'),
-    riskScore: parseScore(entry.risk_score, warnings),
-    riskLevel: parseRiskLevel(entry.risk_level, warnings),
-    sufficientData: parseSufficiency(entry.sufficient_data, warnings),
+    riskScore: parseScore(entry.risk_score, at, refused, warnings),
+    riskLevel: parseRiskLevel(entry.risk_level, at, refused, warnings),
+    sufficientData: sufficiency,
     imputedShare: imputedShare.value,
     documentationShare: documentationShare.value,
     topContributors: contributors.value,
@@ -370,6 +442,9 @@ function parseReading(entry: unknown, at: string, warnings: string[]): Parsed<Re
     // 'expected': a reading that has never been reviewed legitimately has no review time, so
     // absence is not a contradiction. An unparseable one still warns.
     reviewAt: parseInstant(entry.review_at, `${at}.review_at`, warnings, 'expected'),
+    // Absent is the normal case for every source that does not publish it, so absence is silent.
+    // A present but non-finite value is a real contradiction and warns.
+    readingsInState: parseReadingsInState(entry.readings_in_state, at, warnings),
   };
   return { ok: true, value: reading };
 }
@@ -382,6 +457,15 @@ export function parsePatientSnapshot(raw: unknown): Parsed<PatientSnapshot> {
 
   const patientId = requireString(raw.patient_id, 'patient_id');
   if (!patientId.ok) return patientId;
+  // Bed identity and the prompt address. Trim-only, exactly as `weight`/`height` are, and NULLABLE:
+  // a source that does not carry them is not a malformed source, and dropping a patient off the
+  // board for want of a bed number would be a far worse failure than showing one without it.
+  const bedCode = trimmedNullableString(raw.bed_code, 'bed_code');
+  if (!bedCode.ok) return bedCode;
+  const careUnit = trimmedNullableString(raw.unit, 'unit');
+  if (!careUnit.ok) return careUnit;
+  const promptId = trimmedNullableString(raw.prompt_id, 'prompt_id');
+  if (!promptId.ok) return promptId;
   const age = requireFinite(raw.age, 'age');
   if (!age.ok) return age;
   const gender = requireString(raw.gender, 'gender');
@@ -425,6 +509,9 @@ export function parsePatientSnapshot(raw: unknown): Parsed<PatientSnapshot> {
   // appears here or this line does not compile.
   const value: PatientSnapshot = {
     patientId: patientId.value,
+    bedCode: bedCode.value,
+    careUnit: careUnit.value,
+    promptId: promptId.value,
     age: age.value,
     gender: gender.value,
     weight: weight.value,

@@ -9,6 +9,9 @@
   import { navigating, page } from '$app/state';
   import { setAnnouncer } from '$lib/a11y/announcer.svelte';
   import { setAppClock } from '$lib/state/context';
+  import { wardClockFor } from '$lib/state/ward-clock.svelte';
+  import { env } from '$env/dynamic/public';
+  import DemoControls from '$lib/components/DemoControls.svelte';
   import { hydratePrefs } from '$lib/state/prefs.svelte';
   import PulseLoader from '$lib/components/PulseLoader.svelte';
   import { delayGate } from '$lib/state/pending.svelte';
@@ -40,9 +43,18 @@
    * wall clock has to stay accurate to the displayed minute.
    */
   let now = $state(new Date());
+
+  // THE CLOCK FOLLOWS THE DATA WHEN THE DATA LEADS. `wardClockFor` returns the wall clock unless the
+  // newest reading on screen is more than a minute ahead of it, which happens whenever the simulated
+  // ward is streaming: it advances an hour of ward time per reading. Without this every timestamp on
+  // the board renders as an age in the future.
+  const wardClock = $derived(wardClockFor(now));
   setAppClock({
     get now() {
-      return now;
+      return wardClock.now;
+    },
+    get simulated() {
+      return wardClock.simulated;
     },
   });
 
@@ -153,6 +165,14 @@
   <main id="pm-main" class="flex-1 px-4 py-6 lg:px-8" tabindex="-1">
     {@render children()}
   </main>
+
+  <!-- BELOW THE CLINICAL FRAME, never inside it, and only when the flag is set. It is an operator
+       surface: it advances the ward and shows the pipeline's own timings, and neither is something
+       a clinician does. Exact string, never a truthiness test, for the same reason the data-source
+       selector uses one. -->
+  {#if env.PUBLIC_PULSEMIND_DEMO_CONTROLS === 'true'}
+    <DemoControls />
+  {/if}
 </div>
 
 <!--

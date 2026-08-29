@@ -11,6 +11,22 @@ import type { ReviewLog } from './review-log.svelte';
 
 export type EmptyReason = 'no_patients_loaded' | 'filtered_out' | null;
 
+/**
+ * OV-3's search. The handoff says "Search Patient ID" and that is still what the field is labelled,
+ * but a board that shows a bed and refuses to search it is a board a clinician will type a bed into
+ * and get an empty state from. Both are identifiers for the row, neither is a clinical value, and a
+ * source that supplies no bed is unaffected because `null` matches nothing.
+ *
+ * Substring, case-insensitive, on the whole trimmed query. No fuzzy match and no per-token split: a
+ * search that guesses is a search that hides a patient.
+ */
+function matchesQuery(patient: PatientSummary, q: string): boolean {
+  if (patient.patientId.toLowerCase().includes(q)) return true;
+  if (patient.bedCode !== null && patient.bedCode.toLowerCase().includes(q)) return true;
+  if (patient.careUnit !== null && patient.careUnit.toLowerCase().includes(q)) return true;
+  return false;
+}
+
 export class TriageBoard {
   /** Clinical data is never owned here — it is read through a getter from `load` data. */
   readonly #source: () => readonly PatientSummary[];
@@ -71,7 +87,7 @@ export class TriageBoard {
     const q = this.query.trim().toLowerCase();
     return this.ranked.filter((p) => {
       // Handoff section 3: search filters by PATIENT ID only. Nothing else is searchable.
-      if (q !== '' && !p.patientId.toLowerCase().includes(q)) return false;
+      if (q !== '' && !matchesQuery(p, q)) return false;
       // The risk band composes with the review/quality filter rather than replacing it.
       if (this.riskBand !== null && this.#bandOf(p) !== this.riskBand) return false;
       // 'Needs review' is Pending review ONLY. 'unknown' ranks above Reviewed (K1 = 1) but is
@@ -108,7 +124,7 @@ export class TriageBoard {
     // makes them comparable to each other.
     const searched = this.ranked.filter(
       (p) =>
-        (q === '' || p.patientId.toLowerCase().includes(q)) &&
+        (q === '' || matchesQuery(p, q)) &&
         (this.riskBand === null || this.#bandOf(p) === this.riskBand),
     );
     return {

@@ -45,9 +45,17 @@
     </summary>
 
     <ul class="flex flex-col gap-1.5 px-4 pt-1 pb-4 text-sm">
-      <!-- Keyed by the warning text: these are distinct strings naming distinct paths, and an index
-           key would re-pair them across a refresh. -->
-      {#each warnings as warning (warning)}
+      <!-- Keyed by the warning text AND its position. The text alone was the key, on the stated
+           assumption that every warning names a distinct path. Three of them did not, and a patient
+           whose every reading lacked a score produced one identical string per reading: Svelte threw
+           `each_key_duplicate` and the whole screen went blank, with no `+error.svelte` to catch it
+           because route boundaries catch load failures and not render failures (rule 4).
+
+           The producer now names the reading in the text, so duplicates should no longer occur. The
+           ordinal stays anyway: this list is rebuilt whole on every load and never reordered, so the
+           position is stable, and a key that cannot collide is worth more here than one that is
+           merely unlikely to. -->
+      {#each warnings as warning, i (`${warning}#${i}`)}
         <li class="border-s-2 border-insufficient-border ps-3 font-mono break-words">{warning}</li>
       {/each}
     </ul>

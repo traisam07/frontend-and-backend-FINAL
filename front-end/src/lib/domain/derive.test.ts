@@ -12,8 +12,10 @@ import {
   toParameterRows,
   toPatientSummary,
   reviewLabel,
+  RISK_SCORE_DOMAIN,
+  RISK_THRESHOLDS,
 } from './derive';
-import { orderByChartTimeAsc, windowOf } from './window';
+import { orderByChartTimeAsc, RISK_WINDOW_MINUTES, windowOf } from './window';
 
 const NOW = new Date('2026-08-16T12:00:00.000Z');
 
@@ -25,6 +27,9 @@ function reading(over: Partial<Reading> = {}): Reading {
     sufficientData: 'sufficient',
     imputedShare: 0.1,
     documentationShare: 0.9,
+    // Absent by default, so the run-length tests below exercise the client-side WALK. A source that
+    // supplies its own count short-circuits it, and that path is asserted separately.
+    readingsInState: null,
     topContributors: [],
     parameters: [],
     explanation: null,
@@ -77,6 +82,9 @@ test('F-1.4 — on an exact charttime collision the LATER-IN-SOURCE reading wins
 test('a patient with no usable reading projects EVERY clinical member as explicitly absent', () => {
   const summary = toPatientSummary({
     patientId: 'PT-1',
+    bedCode: null,
+    careUnit: null,
+    promptId: null,
     age: 60,
     gender: 'F',
     weight: null,
@@ -96,7 +104,7 @@ test('a patient with no usable reading projects EVERY clinical member as explici
 
 /* ---- F-2: the window and the chart -------------------------------------------------------------- */
 
-test('the 60-minute window is anchored on the LATEST CHARTTIME, not on the wall clock', () => {
+test('the window is anchored on the LATEST CHARTTIME, not on the wall clock', () => {
   // Every reading here is hours old. Anchoring on `Date.now()` would silently empty the chart, which
   // reads as "nothing happening".
   const readings = [
@@ -107,13 +115,31 @@ test('the 60-minute window is anchored on the LATEST CHARTTIME, not on the wall 
   expect(windowOf(readings)).toHaveLength(3);
 });
 
-test('the window excludes readings older than 60 minutes before the anchor, inclusive at the edge', () => {
+test('the window excludes readings older than RISK_WINDOW_MINUTES before the anchor, inclusive at the edge', () => {
+  // The width moved from 60 minutes to a day on 2026-08-28 (see `RISK_WINDOW_MINUTES`), so the
+  // boundary is derived from the constant rather than typed again here: a test that hard-codes the
+  // width stops testing the window and starts testing the number it was written against.
+  const anchor = at('2026-08-16T12:00:00Z').getTime();
+  const minute = 60_000;
   const readings = [
-    reading({ charttime: at('2026-08-16T10:59:00Z') }), // 61 min before anchor — out
-    reading({ charttime: at('2026-08-16T11:00:00Z') }), // exactly 60 min — in
-    reading({ charttime: at('2026-08-16T12:00:00Z') }), // the anchor
+    reading({
+      charttime: new Date(anchor - (RISK_WINDOW_MINUTES + 1) * minute),
+    }), // one past — out
+    reading({ charttime: new Date(anchor - RISK_WINDOW_MINUTES * minute) }), // exactly at it — in
+    reading({ charttime: new Date(anchor) }), // the anchor
   ];
   expect(windowOf(readings)).toHaveLength(2);
+});
+
+test('the window is wide enough to hold a full day of HOURLY readings', () => {
+  // The reason the width changed. The live service advances the ward one hour per reading and the
+  // band table's dwell clock is denominated on that grid, so a 60-minute window admitted two points
+  // and the chart rendered its insufficient-history literal on every patient, for ever.
+  const anchor = at('2026-08-16T12:00:00Z').getTime();
+  const hourly = Array.from({ length: 24 }, (_, i) =>
+    reading({ charttime: new Date(anchor - i * 60 * 60_000) }),
+  );
+  expect(windowOf(hourly)).toHaveLength(24);
 });
 
 test('a reading with a null risk score produces NO chart point but IS a data-table row', () => {
@@ -155,27 +181,47 @@ test('a gap larger than twice the median interval starts a NEW segment', () => {
   expect(points.map((p) => p.breakBefore)).toEqual([false, false, false, true]);
 });
 
-test('the y domain is the FIXED RISK_SCORE_DOMAIN (0-100), not the window`s own scores — G-12 override, 2026-08-23', () => {
+test('the y domain is the FIXED RISK_SCORE_DOMAIN, not the window`s own scores — G-12, answered 2026-08-28', () => {
+  // The DOMAIN moved from 0-100 to 0-1 when the live pipeline answered G-12: the score is a
+  // calibrated probability, not a percentage. The PROPERTY under test is unchanged and is the one
+  // that matters: the axis is fixed, so two readings do not stretch to fill the plot and a flat
+  // stretch looks flat.
+  // Derived from the domain, not typed as literals: the scale is a property of the selected data
+  // source now, so a test that hard-codes 0.7 stops testing the axis and starts testing which
+  // backend the suite happened to run against.
+  const span = RISK_SCORE_DOMAIN.max - RISK_SCORE_DOMAIN.min;
+  const at70 = RISK_SCORE_DOMAIN.min + span * 0.7;
+  const at90 = RISK_SCORE_DOMAIN.min + span * 0.9;
   const window60: readonly TimedReading[] = [
-    reading({ charttime: at('2026-08-16T11:00:00Z'), riskScore: 70 }),
-    reading({ charttime: at('2026-08-16T11:30:00Z'), riskScore: 90 }),
+    reading({ charttime: at('2026-08-16T11:00:00Z'), riskScore: at70 }),
+    reading({ charttime: at('2026-08-16T11:30:00Z'), riskScore: at90 }),
   ] as TimedReading[];
   const points = toChartPoints(window60, { width: 100, height: 100 }, NOW);
-  // Against a window whose own min/max were 70/90, the old behaviour put 70 on the floor and 90 on
-  // the ceiling. Against the fixed 0-100 domain neither score is anywhere near either edge: 70 sits
-  // 70% of the way up, 90 sits 90% of the way up.
+  // A self-scaling axis would put the lower value on the floor and the higher on the ceiling.
+  // Against the fixed domain neither is near either edge.
   expect(points[0]?.y).toBeCloseTo(30, 5);
   expect(points[1]?.y).toBeCloseTo(10, 5);
 });
 
 test('a score at the domain floor/ceiling lands exactly on the plot edge, and the domain does not move with the data', () => {
   const window60: readonly TimedReading[] = [
-    reading({ charttime: at('2026-08-16T11:00:00Z'), riskScore: 0 }),
-    reading({ charttime: at('2026-08-16T11:30:00Z'), riskScore: 100 }),
+    reading({ charttime: at('2026-08-16T11:00:00Z'), riskScore: RISK_SCORE_DOMAIN.min }),
+    reading({ charttime: at('2026-08-16T11:30:00Z'), riskScore: RISK_SCORE_DOMAIN.max }),
   ] as TimedReading[];
   const points = toChartPoints(window60, { width: 100, height: 100 }, NOW);
-  expect(points[0]?.y).toBeCloseTo(100, 5); // 0 -> the floor
-  expect(points[1]?.y).toBeCloseTo(0, 5); // 100 -> the ceiling
+  expect(points[0]?.y).toBeCloseTo(100, 5); // the floor
+  expect(points[1]?.y).toBeCloseTo(0, 5); // the ceiling
+});
+
+test('whatever scale the source declares, the thresholds are real values on it', () => {
+  // The three numbers this replaced were read off a mockup's pixel positions and were 40 / 65 / 85
+  // on a 0-100 axis. Nothing about them was wrong as design intent; they simply described a
+  // different backend. This asserts the invariant that made them wrong HERE: every threshold has to
+  // be a value a real score can take, or the chart draws lines no patient on the unit can reach.
+  expect(RISK_THRESHOLDS.medium).toBeGreaterThan(RISK_SCORE_DOMAIN.min);
+  expect(RISK_THRESHOLDS.critical).toBeLessThan(RISK_SCORE_DOMAIN.max);
+  expect(RISK_THRESHOLDS.medium).toBeLessThan(RISK_THRESHOLDS.high);
+  expect(RISK_THRESHOLDS.high).toBeLessThan(RISK_THRESHOLDS.critical);
 });
 
 test('U-12 — colliding charttimes produce UNIQUE {#each} keys in all three projections', () => {
@@ -213,13 +259,21 @@ test('U-12 — colliding charttimes produce UNIQUE {#each} keys in all three pro
 
 test('F-2 — a reading whose sufficiency is not confirmed is marked DISTINCTLY', () => {
   const window60: readonly TimedReading[] = [
-    reading({ charttime: at('2026-08-16T11:00:00Z'), riskScore: 40, sufficientData: 'sufficient' }),
+    reading({
+      charttime: at('2026-08-16T11:00:00Z'),
+      riskScore: 40,
+      sufficientData: 'sufficient',
+    }),
     reading({
       charttime: at('2026-08-16T11:10:00Z'),
       riskScore: 50,
       sufficientData: 'insufficient',
     }),
-    reading({ charttime: at('2026-08-16T11:20:00Z'), riskScore: 60, sufficientData: null }),
+    reading({
+      charttime: at('2026-08-16T11:20:00Z'),
+      riskScore: 60,
+      sufficientData: null,
+    }),
   ] as TimedReading[];
   const points = toChartPoints(window60, { width: 100, height: 100 }, NOW);
   // Both non-sufficient branches are flagged: `null` is not `sufficient`.
@@ -235,7 +289,11 @@ test('the run is counted BACKWARDS from the latest reading and stops at the firs
     reading({ charttime: at('2026-08-16T10:40:00Z'), riskLevel: 'High' }),
     reading({ charttime: at('2026-08-16T11:00:00Z'), riskLevel: 'High' }),
   ];
-  expect(heldAtLevel(readings)).toEqual({ kind: 'value', count: 3, truncated: false });
+  expect(heldAtLevel(readings)).toEqual({
+    kind: 'value',
+    count: 3,
+    truncated: false,
+  });
 });
 
 test('a run that reaches the oldest supplied reading is TRUNCATED', () => {
@@ -244,7 +302,11 @@ test('a run that reaches the oldest supplied reading is TRUNCATED', () => {
     reading({ charttime: at('2026-08-16T11:00:00Z'), riskLevel: 'Critical' }),
   ];
   // The caller renders `≥ 2 readings at this level` with the ≥ glyph, never an exact count.
-  expect(heldAtLevel(readings)).toEqual({ kind: 'value', count: 2, truncated: true });
+  expect(heldAtLevel(readings)).toEqual({
+    kind: 'value',
+    count: 2,
+    truncated: true,
+  });
 });
 
 test('a null risk level on the LATEST reading makes the count unavailable — the walk never starts', () => {
@@ -301,6 +363,7 @@ test('parameter values render at the precision delivered, with the unit marker b
       {
         name: 'FiO2',
         slug: 'fio2',
+        unit: null,
         value: 0.4,
         source: 'measured',
         lastMeasured: { kind: 'value', value: at('2026-08-16T11:00:00Z') },
@@ -309,6 +372,7 @@ test('parameter values render at the precision delivered, with the unit marker b
       {
         name: 'Tidal volume',
         slug: 'tidal-volume',
+        unit: null,
         value: 420,
         source: 'carried_forward',
         lastMeasured: { kind: 'unavailable', reason: 'not_provided' },
@@ -346,6 +410,7 @@ test('provenance counts list unknown on its own line and add up to the number of
         {
           name: 'PEEP',
           slug: 'peep',
+          unit: null,
           value: 5,
           source: 'measured',
           lastMeasured: { kind: 'unavailable', reason: 'not_provided' },
@@ -359,6 +424,7 @@ test('provenance counts list unknown on its own line and add up to the number of
         {
           name: 'PEEP',
           slug: 'peep',
+          unit: null,
           value: 6,
           source: null,
           lastMeasured: { kind: 'unavailable', reason: 'not_provided' },

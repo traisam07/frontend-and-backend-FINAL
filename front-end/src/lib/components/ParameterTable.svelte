@@ -76,8 +76,17 @@
       <!-- Said ONCE, in the caption, so a table read in isolation still carries it — and said in
            visible text rather than only as a `data-clarify` attribute, because the clinician reading
            the number is the person who needs to know the label is provisional (**D-23**, G-01). The
-           dotted-underlined units in the cells are the per-value half of the same statement. -->
-      {UNIT_ASSUMED_NOTE}
+           dotted-underlined units in the cells are the per-value half of the same statement.
+
+           ⚠️ ONLY WHEN A UNIT ON THIS TABLE IS ACTUALLY ASSERTED BY THE INTERFACE, since 2026-08-28.
+           The sentence was unconditional, which was true while no source supplied a unit. The live
+           pipeline supplies a real one for nine of its eleven parameters, and printing "units are
+           supplied by this interface, not by the assessment data" over a table of measured units is
+           a false statement about the provenance of every value in it. That is the same class of
+           error as an invented unit, pointing the other way. -->
+      {#if rows.some((r) => r.unitAssumed)}
+        {UNIT_ASSUMED_NOTE}
+      {/if}
     </caption>
     <!-- `text-sm` -> `text-body`, 2026-08-23, at the product owner's request ("cho size chữ nội
          dung Respiratory parameters to lên") — headers grew alongside the body cells in

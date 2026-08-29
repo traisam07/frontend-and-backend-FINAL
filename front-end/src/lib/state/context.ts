@@ -28,6 +28,13 @@ const CLOCK_KEY = Symbol('pulsemind:clock');
 
 export interface AppClock {
   readonly now: Date;
+  /**
+   * TRUE WHEN `now` IS THE WARD'S CLOCK RATHER THAN THE WALL'S. The live service advances ward time
+   * an hour per reading, so a streaming unit's newest reading can be hours ahead of the browser.
+   * See `$lib/state/ward-clock.svelte`. The header renders a different label for each, because a
+   * clock that leads and does not say so is indistinguishable from one that is wrong.
+   */
+  readonly simulated: boolean;
 }
 
 export const setAppClock = (clock: AppClock): AppClock => setContext(CLOCK_KEY, clock);

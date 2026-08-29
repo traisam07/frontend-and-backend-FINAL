@@ -17,6 +17,7 @@
   import type { PageProps } from './$types';
   import { TriageBoard } from '$lib/state/triage.svelte';
   import { setTriageBoard, getReviewLog } from '$lib/state/context';
+  import { observeWardInstants } from '$lib/state/ward-clock.svelte';
   import ContextDrawer from '$lib/components/ContextDrawer.svelte';
   import PatientContextBody from '$lib/components/PatientContextBody.svelte';
   import PatientDetailBody from '$lib/components/PatientDetailBody.svelte';
@@ -31,6 +32,14 @@
   const patientId = $derived(page.params.patientId ?? '');
   // `snapshot` is the one key `[patientId]/+layout.ts` returns.
   const snapshot = $derived(data.snapshot);
+
+  // PUBLISH THE WARD'S NEWEST INSTANT so the app clock can follow it. A `$effect` rather than a
+  // `$derived` because the READER is the root layout and this is a route component far below it:
+  // Svelte context reads downward only, so no derivation can see both ends. It writes one number,
+  // no clinical value is computed from it, and it is idempotent.
+  $effect(() => {
+    observeWardInstants(snapshot.readings.map((r) => r.charttime));
+  });
 
   /**
    * The board context, so `ReviewPanel` can hold the local `Mark as reviewed` set on this screen

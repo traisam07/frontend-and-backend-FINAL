@@ -186,7 +186,7 @@
         <p
           class="flex min-h-40 items-center justify-center rounded-md border border-dashed border-border bg-chart-plot-bg p-4 text-center text-body text-fg-secondary"
         >
-          insufficient history for a 60-minute view
+          insufficient history for a 24-hour view
         </p>
       {/if}
     </section>
@@ -260,7 +260,7 @@
       <section aria-labelledby="{uid}-summary" class={CARD}>
         <h2 id="{uid}-summary" class="text-lg font-semibold">Provenance summary</h2>
         <p class="text-sm text-fg-secondary">
-          Readings in the 60-minute window, counted by where this parameter's value came from.
+          Readings in the 24-hour window, counted by where this parameter's value came from.
         </p>
         <dl class="flex flex-col gap-2">
           <div

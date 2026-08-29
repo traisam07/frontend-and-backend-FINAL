@@ -143,10 +143,13 @@
           class="text-micro font-semibold tracking-[0.04em] text-fg-muted uppercase"
           aria-hidden="true"
         >
-          Unit clock · {DISPLAY_ZONE_LABEL}
+          {clock.simulated ? 'Ward clock · simulated' : 'Unit clock'} · {DISPLAY_ZONE_LABEL}
         </span>
         <span class="text-body font-semibold text-fg tabular-nums md:text-lg">
-          <span class="sr-only">Unit clock, {DISPLAY_ZONE_LABEL} time:</span>
+          <span class="sr-only"
+            >{clock.simulated ? 'Ward clock, simulated, ahead of the wall clock' : 'Unit clock'}, {DISPLAY_ZONE_LABEL}
+            time:</span
+          >
           {clockTime.format(clock.now)}
           <span class="hidden text-sm font-normal text-fg-secondary md:inline"
             >{clockDateLong.format(clock.now)}</span

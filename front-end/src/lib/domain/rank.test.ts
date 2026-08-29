@@ -4,6 +4,11 @@ import { comparePatients, rankPatients } from './rank';
 
 function patient(over: Partial<PatientSummary> & { patientId: string }): PatientSummary {
   return {
+    // Identity, never a ranking key: the comparator's last tiebreak is `patientId` and nothing
+    // sorts on a bed. Absent by default so a test cannot accidentally assert on a fabricated one.
+    bedCode: null,
+    careUnit: null,
+    promptId: null,
     reviewStatus: 'reviewed',
     riskLevel: 'Low',
     riskScore: 10,
@@ -24,8 +29,16 @@ const ids = (list: readonly PatientSummary[]) => list.map((p) => p.patientId);
 
 test('K1 — pending review sorts first, then unknown, then reviewed', () => {
   const set = [
-    patient({ patientId: 'C', reviewStatus: 'reviewed', riskLevel: 'Critical' }),
-    patient({ patientId: 'A', reviewStatus: 'pending_review', riskLevel: 'Low' }),
+    patient({
+      patientId: 'C',
+      reviewStatus: 'reviewed',
+      riskLevel: 'Critical',
+    }),
+    patient({
+      patientId: 'A',
+      reviewStatus: 'pending_review',
+      riskLevel: 'Low',
+    }),
     patient({ patientId: 'B', reviewStatus: 'unknown', riskLevel: 'Low' }),
   ];
   // A Critical REVIEWED patient sits below a Low PENDING one: review state is the first key, and
@@ -93,7 +106,12 @@ test('identical input in two different array orders produces the identical ranke
       riskLevel: 'High',
       riskScore: 71,
     }),
-    patient({ patientId: 'PT-2', reviewStatus: 'reviewed', riskLevel: 'Critical', riskScore: 90 }),
+    patient({
+      patientId: 'PT-2',
+      reviewStatus: 'reviewed',
+      riskLevel: 'Critical',
+      riskScore: 90,
+    }),
   ];
   const forward = ids(rankPatients(set));
   const backward = ids(rankPatients([...set].reverse()));
@@ -116,9 +134,21 @@ test('rankPatients is pure — it never sorts the input in place', () => {
 
 test('any filtered subset is a SUBSEQUENCE of the full ranking', () => {
   const set = [
-    patient({ patientId: 'A', reviewStatus: 'pending_review', riskLevel: 'Critical' }),
-    patient({ patientId: 'B', reviewStatus: 'pending_review', riskLevel: 'Low' }),
-    patient({ patientId: 'C', reviewStatus: 'reviewed', riskLevel: 'Critical' }),
+    patient({
+      patientId: 'A',
+      reviewStatus: 'pending_review',
+      riskLevel: 'Critical',
+    }),
+    patient({
+      patientId: 'B',
+      reviewStatus: 'pending_review',
+      riskLevel: 'Low',
+    }),
+    patient({
+      patientId: 'C',
+      reviewStatus: 'reviewed',
+      riskLevel: 'Critical',
+    }),
     patient({ patientId: 'D', reviewStatus: 'unknown', riskLevel: 'High' }),
   ];
   const full = ids(rankPatients(set));
@@ -133,14 +163,26 @@ test('any filtered subset is a SUBSEQUENCE of the full ranking', () => {
 
 test('a patient moving from Reviewed to Pending review moves UP', () => {
   const before = [
-    patient({ patientId: 'A', reviewStatus: 'pending_review', riskLevel: 'Low' }),
-    patient({ patientId: 'B', reviewStatus: 'reviewed', riskLevel: 'Critical' }),
+    patient({
+      patientId: 'A',
+      reviewStatus: 'pending_review',
+      riskLevel: 'Low',
+    }),
+    patient({
+      patientId: 'B',
+      reviewStatus: 'reviewed',
+      riskLevel: 'Critical',
+    }),
   ];
   expect(ids(rankPatients(before))).toEqual(['A', 'B']);
 
   const after = [
     before[0] as PatientSummary,
-    patient({ patientId: 'B', reviewStatus: 'pending_review', riskLevel: 'Critical' }),
+    patient({
+      patientId: 'B',
+      reviewStatus: 'pending_review',
+      riskLevel: 'Critical',
+    }),
   ];
   expect(ids(rankPatients(after))).toEqual(['B', 'A']);
 });

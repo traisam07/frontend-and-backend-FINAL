@@ -67,10 +67,13 @@
        that it was the `unit not supplied` marker, and before THAT the board printed a bare number
        while Patient Detail printed the marker for the same value.
 
-       No space before the sign, which is the convention for percent and is what keeps a 30-row
-       column narrow. It is inside the same `whitespace-nowrap` element as the number, so the two
-       cannot be separated by a line break, a screenshot, or a copy-paste into a note. -->
+       ⚠️ A SPACE BEFORE THE UNIT, and it is not cosmetic. Closed-up is the convention for the
+       `%` sign this used to carry, and it is wrong for a word: `0.7246probability (0-1)` is what
+       the board rendered on the first live run. The space is a plain one inside the same
+       `whitespace-nowrap` element, so it separates the two without ever letting a line break,
+       a screenshot or a copy-paste put the number somewhere the unit is not.
+       -->
   {#if score !== null}<span class="whitespace-nowrap"
-      >{score}<span class="font-normal">{RISK_SCORE_UNIT}</span></span
+      >{score} <span class="font-normal">{RISK_SCORE_UNIT}</span></span
     >{:else}<span class="whitespace-nowrap" data-clarify="G-31">score unavailable</span>{/if}
 </span>

@@ -31,14 +31,29 @@
      treated identically, per the data contract's own statement that both mean "no references". -->
 <script lang="ts">
   import type { Reading } from '$lib/domain/types';
+  import type { ExplanationRequest } from '$lib/state/explanation.svelte';
 
-  let { reading }: { reading: Reading } = $props();
+  let {
+    reading,
+    /**
+     * THE SAME request object `ExplanationSection` renders from, so both halves fill from ONE call
+     * on one frame. The references are the passages the generator was SHOWN; they belong to the
+     * text they grounded, and a second lookup here could disagree with the prose beside it.
+     */
+    request = undefined,
+  }: { reading: Reading; request?: ExplanationRequest | undefined } = $props();
 
   const uid = $props.id();
 
   /** The gate. ONLY `=== 'sufficient'` unlocks any rendering here — never `!== 'insufficient'`. */
   const gateOpen = $derived(reading.sufficientData === 'sufficient');
-  const citations = $derived(reading.citations);
+
+  const chartedIso = $derived(reading.charttime?.toISOString() ?? null);
+  const generating = $derived(chartedIso !== null && (request?.generatingFor(chartedIso) ?? false));
+  const generated = $derived(chartedIso === null ? null : (request?.resultFor(chartedIso) ?? null));
+
+  /** Generated references for THIS reading, else whatever the assessment already carried. */
+  const citations = $derived(generated?.citations ?? reading.citations);
   const hasCitations = $derived(citations !== null && citations.length > 0);
 
   const UNKNOWN =
@@ -47,7 +62,19 @@
 </script>
 
 {#if gateOpen}
-  {#if hasCitations}
+  {#if generating}
+    <!-- THE SAME FIFTH TREATMENT, at the same moment. The two panels used to disagree here: this one
+         swapped its whole body for a note while the explanation panel kept the previous prose, so a
+         re-prompt left half the screen static while the other half visibly reloaded. Both now
+         branch on the same flag first. -->
+    <div>
+      <h2 id="{uid}-references" class="text-lg font-semibold">Guideline references</h2>
+      <p class="mt-1 text-body leading-relaxed text-fg-secondary" role="status">
+        Selecting the approved passages for this reading, in the same call that writes the
+        explanation.
+      </p>
+    </div>
+  {:else if hasCitations}
     <div>
       <h2 id="{uid}-references" class="text-lg font-semibold">Guideline references</h2>
       <!-- `{name, claim}` as plain text; no links exist (G-17). -->

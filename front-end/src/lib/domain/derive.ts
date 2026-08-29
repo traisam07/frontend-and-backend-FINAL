@@ -4,6 +4,7 @@
 // Effect-free. No runes here at all: pure functions, unit-tested directly, imported by the state
 // module and by the loads. Derivation NEVER happens inside a component.
 
+import { env } from '$env/dynamic/public';
 import { assumedUnitLabel } from './units';
 import type {
   ChartPoint,
@@ -71,6 +72,9 @@ export function toPatientSummary(snapshot: PatientSnapshot): PatientSummary {
   if (latest === null) {
     return {
       patientId: snapshot.patientId,
+      bedCode: snapshot.bedCode,
+      careUnit: snapshot.careUnit,
+      promptId: snapshot.promptId,
       reviewStatus: snapshot.reviewStatus,
       riskLevel: null, // U-11, and the card says so in words
       riskScore: null,
@@ -82,6 +86,11 @@ export function toPatientSummary(snapshot: PatientSnapshot): PatientSummary {
   }
   return {
     patientId: snapshot.patientId,
+    // Identity, not a clinical value: it is copied from the snapshot rather than from the reading,
+    // because a patient does not change bed between readings within one snapshot.
+    bedCode: snapshot.bedCode,
+    careUnit: snapshot.careUnit,
+    promptId: snapshot.promptId,
     reviewStatus: snapshot.reviewStatus, // patient-level (warning_status.status), never per reading
     riskLevel: latest.riskLevel, // null carried through => S-05. Never 'Low'.
     riskScore: latest.riskScore, // null carried through => S-35. Never 0.
@@ -89,7 +98,7 @@ export function toPatientSummary(snapshot: PatientSnapshot): PatientSummary {
     latestChartTime: latest.charttime,
     topContributors: latest.topContributors,
     // The SAME function PD-6 calls, over the SAME full readings array — F-3 counts over everything
-    // delivered, never over the 60-minute window. Deriving it here is the only way the board can
+    // delivered, never over the risk-history window. Deriving it here is the only way the board can
     // show it at all: `toPatientSummary` is where `readings[]` stops travelling.
     heldAtLevel: heldAtLevel(snapshot.readings),
   };
@@ -112,55 +121,80 @@ export function toPatientSummary(snapshot: PatientSnapshot): PatientSummary {
  */
 export const UNIT_NOT_SUPPLIED = 'unit not supplied';
 
-/**
- * THE RISK SCORE'S UNIT, declared by the product owner on 2026-08-18 (**D-27**).
- *
- * Until then this app printed `unit not supplied` beside the score, because no `unit` field exists
- * on the wire (**G-01**) and the scale was undeclared (**G-12**). The owner has now stated that the
- * score is a percentage.
- *
- * WHAT THIS IS, AND WHAT IT IS EMPHATICALLY NOT. It is a LABEL, supplied by the person entitled to
- * supply it. It is not the frontend inferring a scale, which CLAUDE.md rule 16 bans and which
- * Handoff section 8 puts out of scope — the distinction is the same one D-23 drew for the parameter
- * units, and it is the whole reason this constant exists rather than a `'%'` typed at eleven call
- * sites.
- *
- * NOT ONE DIGIT MOVES. There is no `toFixed`, no `Math.round`, no `* 100`, no `/ 100` and no
- * `Intl.NumberFormat` anywhere in the score's path, here or at any render site, and none is being
- * added. The delivered set already reads as a percentage without arithmetic: 95 finite scores
- * spanning 25.2-91.3, at most one decimal, none negative, none above 100, none inside (0, 1].
- * A value that arrived as 87.7 is printed as 87.7 and now carries a `%`.
- *
- * AND IT LICENSES NOTHING ELSE. Knowing the unit is not knowing that the axis should be pinned to
- * 0-100, and rule 16's ban on a proportional gauge or a reference band is untouched: the 60-minute
- * chart still scales to the window's own extremes, because "percent of what, bounded how" is still
- * **G-12** and still open.
- */
-export const RISK_SCORE_UNIT = '%';
+/* ---- the score's scale, and WHICH BACKEND IT BELONGS TO ------------------------------------------
+
+   ⚠️ THE SCALE IS A PROPERTY OF THE SOURCE, NOT OF THE APP, and treating it as global was a defect
+   that shipped for a day.
+
+   D-27 declared the unit `%`, and it was right for the data it was declared against: the fixture set
+   holds 95 scores from 25.2 to 91.3, none inside (0, 1]. The live PulseMind pipeline emits a
+   Platt-calibrated probability, and every one of ITS scores is inside (0, 1]. Both statements are
+   true. Neither is true of the other's data.
+
+   Retracting `%` globally therefore did not fix the problem, it moved it: `resolvePatientSource`
+   falls through to FIXTURES for any unset or unrecognised `PUBLIC_PULSEMIND_DATA_SOURCE`, so a fresh
+   clone and the e2e suite both rendered `91.3 probability (0-1)`. A false scale claim on a clinical
+   value, which is exactly what rule 16 bans, pointing the other way.
+
+   So each source carries its own scale, and the selector that already chooses the source chooses it.
+   Nothing here derives a band from a score, on either scale.                                      */
+
+interface RiskScoreScale {
+  /** Rendered adjacent to the value at every display point (rule 15). */
+  readonly unit: string;
+  /** The history chart's FIXED y-domain, so two readings cannot stretch to fill the plot. */
+  readonly domain: { readonly min: number; readonly max: number };
+  /** Reference lines only. Never a second source of truth for the level. */
+  readonly thresholds: {
+    readonly medium: number;
+    readonly high: number;
+    readonly critical: number;
+  };
+}
 
 /**
- * THE 60-MINUTE HISTORY CHART'S FIXED Y-DOMAIN, and `RISK_THRESHOLDS` below it — both added
- * 2026-08-23 on the product owner's EXPLICIT, TWICE-GIVEN word, overriding **G-12** on this one
- * chart only. See `docs/spec/open-questions.md` G-12 for the full record of what was said and in
- * what order; the short version is that the owner confirmed these are real backend-confirmed
- * numbers, then, asked for the exact cut-offs, pointed at a wireframe reference image rather than
- * typing digits — so the three numbers below are READ OFF A MOCKUP'S PIXEL POSITIONS, the
- * weakest-sourced values in this file, and the ONE place to correct them if they are wrong.
+ * THE HANDOFF BACKEND AND THE FIXTURES, unchanged from D-27.
  *
- * WHAT THIS OVERRIDE DOES NOT DO: it does not answer G-12 (still OPEN everywhere else), and it does
- * not license deriving `risk_level` from `risk_score` — `RiskChip`, PD-5's band slot and every
- * other screen still print only the backend's own `risk_level`, never computed from the number.
- * These two constants feed exactly one thing: the reference lines and shaded bands drawn on
- * `RiskHistoryChart`, which are decorative context, not a second source of truth for the level.
+ * The three thresholds were read off a mockup's pixel positions, which the comment that carried them
+ * said plainly and named as the one place to correct them. They are still the weakest-sourced values
+ * here; they are also still the right ones for a 0-100 scale, so they stay until that backend
+ * supplies real cuts.
  */
-export const RISK_SCORE_DOMAIN = { min: 0, max: 100 } as const;
+const HANDOFF_SCALE: RiskScoreScale = {
+  unit: '%',
+  domain: { min: 0, max: 100 },
+  thresholds: { medium: 40, high: 65, critical: 85 },
+};
 
-/** Same override, same register row (**G-12**). `medium`/`high`/`critical` name the THRESHOLD a
- *  band starts at, on `RISK_SCORE_DOMAIN`'s own 0–100 scale — never re-derived, never hard-coded a
- *  second time anywhere else. Passed into `RiskHistoryChart` as a prop, not read by it as a
- *  constant, so a real backend-delivered value (were G-12 ever answered) could replace this import
- *  at the one call site rather than inside the chart. */
-export const RISK_THRESHOLDS = { medium: 40, high: 65, critical: 85 } as const;
+/**
+ * THE LIVE PULSEMIND PIPELINE.
+ *
+ * `risk_score` is a Platt-calibrated probability of the respiratory arm of composite deterioration
+ * within six hours, so **G-12 is answered rather than overridden** on this path, and the thresholds
+ * are the fitted band table's own cuts rather than a reading of a picture.
+ *
+ * The label states the scale in words and the number is left alone. That is `$lib/domain/units`'s
+ * own pattern: FiO2 is labelled `fraction (0–1)` because appending `%` to 0.42 would describe a
+ * patient on moderate support as breathing something unsurvivable. A probability is the same shape
+ * of quantity and gets the same treatment. Not one digit moves on either scale.
+ */
+const PULSEMIND_SCALE: RiskScoreScale = {
+  unit: 'probability (0–1)',
+  domain: { min: 0, max: 1 },
+  thresholds: { medium: 0.1253, high: 0.2556, critical: 0.543 },
+};
+
+/**
+ * Exact string, never a truthiness test, and the same comparison `resolvePatientSource` makes. Read
+ * once at module load: the source cannot change without a reload, and a scale that could change
+ * under a rendered number would be worse than one that is fixed at the wrong value.
+ */
+const SCALE: RiskScoreScale =
+  env.PUBLIC_PULSEMIND_DATA_SOURCE === 'pulsemind' ? PULSEMIND_SCALE : HANDOFF_SCALE;
+
+export const RISK_SCORE_UNIT = SCALE.unit;
+export const RISK_SCORE_DOMAIN = SCALE.domain;
+export const RISK_THRESHOLDS = SCALE.thresholds;
 
 /**
  * F-9 / PD-10, and the ONLY producer of `ParameterRowVm`. One row per entry of the F-1 latest
@@ -185,8 +219,11 @@ export function toParameterRows(latest: TimedReading): readonly ParameterRowVm[]
     // product owner asked the interface to supply one anyway (**D-23**), so the label comes from
     // the exact-name table in `$lib/domain/units` and falls back to the marker for any quantity
     // that table does not know. The fallback is the point: an unknown name gets no guess.
-    unitLabel: assumedUnitLabel(parameter.name) ?? UNIT_NOT_SUPPLIED,
-    unitAssumed: assumedUnitLabel(parameter.name) !== null,
+    // SUPPLIED BEATS ASSERTED, and the fallback chain is the whole of **G-01**'s answer: a unit the
+    // service sent is a fact and carries no marker; the asserted table is a provisional label and
+    // does; a quantity neither knows keeps the marker literal and gets no guess.
+    unitLabel: parameter.unit ?? assumedUnitLabel(parameter.name) ?? UNIT_NOT_SUPPLIED,
+    unitAssumed: parameter.unit === null && assumedUnitLabel(parameter.name) !== null,
     source: parameter.source, // null => S-15; the badge renders it, and never as 'measured'
     lastMeasured: parameter.lastMeasured, // carries its own reason (F-10), already decided
     chartedIso,
@@ -261,7 +298,7 @@ export function toChartPoints(
   const last = scored.at(-1);
   // Take the elements, do not index: a `.length` check does not narrow under
   // noUncheckedIndexedAccess. Nothing plottable => no marks, and the caller renders U-11 or the
-  // "insufficient history for a 60-minute view" literal instead of an empty axis.
+  // "insufficient history for a 24-hour view" literal instead of an empty axis.
   if (first === undefined || last === undefined) return [];
 
   const t0 = first.reading.charttime.getTime();
@@ -369,7 +406,10 @@ export function primaryDriver(
   const ordered = orderContributors(contributors);
   const [first, second] = ordered;
   if (first === undefined) return null;
-  return { ...first, tied: second !== undefined && second.contribution === first.contribution };
+  return {
+    ...first,
+    tied: second !== undefined && second.contribution === first.contribution,
+  };
 }
 
 /**
@@ -404,6 +444,15 @@ export function heldAtLevel(
   if (latest === undefined) return { kind: 'unavailable' }; // nothing to count from — U-11
   const level = latest.riskLevel;
   if (level === null) return { kind: 'unavailable' }; // F-3.4 — never count a run of unknowns
+
+  // **G-32 ANSWERED.** When the publisher supplies its own run length, that is the count, and the
+  // walk below is not run at all. The walk can only see readings that were SENT, so on the board
+  // (one reading per patient) it can never answer anything but "at least 1", while the service that
+  // ran the hysteresis machine knows the real figure. `truncated` is false because this count is not
+  // bounded by how much history travelled: it is the whole run.
+  if (latest.readingsInState !== null) {
+    return { kind: 'value', count: latest.readingsInState, truncated: false };
+  }
 
   let n = 0;
   // F-3.2 walks BACKWARDS from the latest reading, and `ordered` is ascending, so reverse it.

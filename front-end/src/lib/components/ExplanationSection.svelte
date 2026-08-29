@@ -25,6 +25,21 @@
      locations still guaranteed to render every time (the references slot is the one the product
      owner asked to become conditional).
 
+     A FIFTH TREATMENT, ADDED 2026-08-28: `generating`. The four below are all statements about a
+     reading that has already been decided; this one is the only state in which the panel is doing
+     something. It sits INSIDE the same region and takes the S-37 slot while it runs, so the rule
+     that the four never share a heading is extended rather than broken.
+
+     ⚠️ `generating` IS CHECKED BEFORE `explanation === null`, AND THE ORDER IS THE WHOLE FIX. Put
+     the generating state inside the not-supplied branch and it shows on the FIRST generation and
+     never again: asking for a second explanation leaves the previous prose sitting there while the
+     references panel beside it visibly clears and refills. Reported, in those words, on the React
+     build this replaces.
+
+     ⚠️ DIMMING THE OLD PROSE INSTEAD WAS TRIED AND REJECTED. Greyed-out text still reads as the
+     answer while the panel claims to be writing a new one. It is removed outright, and nothing is
+     lost: the previous explanation is still on the assessment and reappears if the generation fails.
+
      FOUR TREATMENTS THAT NEVER SHARE A HEADING (section 3 rule 12):
        S-11  present                      normal prose + reference list
        S-10  `insufficient`               `Explanation withheld`
@@ -48,10 +63,42 @@
      colour surrounds it. -->
 <script lang="ts">
   import type { Reading } from '$lib/domain/types';
+  import type { ExplanationRequest } from '$lib/state/explanation.svelte';
+  import Button from './Button.svelte';
 
-  let { reading }: { reading: Reading } = $props();
+  let {
+    reading,
+    /**
+     * The shared request, owned one level up so this panel and the references panel fill from the
+     * SAME call. Optional: a source with no generate endpoint passes none and the panel is exactly
+     * the read-only four-state component it was.
+     */
+    request = undefined,
+    /** The patient to generate for. Required only when `request` is supplied. */
+    patientId = undefined,
+  }: {
+    reading: Reading;
+    request?: ExplanationRequest | undefined;
+    patientId?: string | undefined;
+  } = $props();
 
   const uid = $props.id();
+
+  /** The reading's own instant, and the tag every generated result is matched against. */
+  const chartedIso = $derived(reading.charttime?.toISOString() ?? null);
+
+  /** A control is offered only when there is somewhere to send the request and a reading to name. */
+  const canGenerate = $derived(
+    request !== undefined && patientId !== undefined && chartedIso !== null,
+  );
+
+  const generating = $derived(chartedIso !== null && (request?.generatingFor(chartedIso) ?? false));
+
+  /** Generated prose for THIS reading, else whatever the assessment already carried. */
+  const generated = $derived(chartedIso === null ? null : (request?.resultFor(chartedIso) ?? null));
+  /** Scoped to THIS reading, so a failure cannot outlive the reading it was raised against. */
+  const failure = $derived(chartedIso === null ? null : (request?.failureFor(chartedIso) ?? null));
+  const text = $derived(generated?.text ?? reading.explanation);
 
   /** The gate. ONLY `=== 'sufficient'` unlocks the normal rendering — never `!== 'insufficient'`. */
   const gateOpen = $derived(reading.sufficientData === 'sufficient');
@@ -85,7 +132,28 @@
       </p>
     {/if}
   </div>
-{:else if reading.explanation === null}
+{:else if generating}
+  <!-- THE FIFTH TREATMENT, and it is checked BEFORE the null branch below. Two different headings,
+       because writing a first explanation and re-writing one are different things to be told. -->
+  <div>
+    <h2 id="{uid}-explanation" class="text-lg font-semibold">
+      {text === null ? 'Writing the explanation…' : 'Re-running the model…'}
+    </h2>
+    <p class="mt-1 max-w-[62ch] text-body leading-relaxed text-fg-secondary" role="status">
+      A 7B model is running locally on one graphics card. This takes tens of seconds. The score,
+      band, inputs and ranked factors are already final and do not wait for it.
+    </p>
+    {#if text !== null}
+      <!-- Say it before they wait half a minute for it. Decoding is greedy, so re-running the model
+           on the same reading returns byte-identical prose. Unannounced, the honest outcome is
+           indistinguishable from a button that did nothing. -->
+      <p class="mt-1 max-w-[62ch] text-body leading-relaxed text-fg-secondary">
+        Decoding is greedy, so the same reading returns the same wording. The guideline passages are
+        being selected again in the same call.
+      </p>
+    {/if}
+  </div>
+{:else if text === null}
   <!-- STATE S-37 — a SYSTEM statement, with its own heading and its own mandated body. -->
   <div class={WITHHELD}>
     <h2 id="{uid}-explanation" class="text-lg font-semibold">Explanation not supplied</h2>
@@ -93,11 +161,38 @@
       No explanation accompanied this reading. This is not a statement that no risk factors are
       present.
     </p>
+    {#if failure !== null}
+      <p class="text-body text-insufficient-fg" role="status">{failure}</p>
+    {/if}
+    {#if canGenerate && chartedIso !== null && patientId !== undefined}
+      <Button variant="secondary" onclick={() => request?.generate(patientId, chartedIso)}>
+        Generate explanation
+      </Button>
+    {/if}
   </div>
 {:else}
   <div>
     <h2 id="{uid}-explanation" class="text-lg font-semibold">Explanation</h2>
     <!-- Plain interpolation; never `{@html}`. -->
-    <p class="text-body leading-relaxed">{reading.explanation}</p>
+    <p class="text-body leading-relaxed">{text}</p>
+    {#if failure !== null}
+      <!-- A failed REGENERATION. The prose above is the previous result, still valid and still
+           grounded, so it stays; this says the new attempt did not land. -->
+      <p class="mt-2 max-w-[62ch] text-body text-insufficient-fg" role="status">
+        {failure}
+      </p>
+    {/if}
+    {#if canGenerate && chartedIso !== null && patientId !== undefined}
+      <!-- The control stays available after a first explanation exists. It used to be offered only
+           while there was nothing to show, so once a bed had any explanation the affordance
+           disappeared and the text stayed pinned to an older reading. -->
+      <Button
+        variant="secondary"
+        class="mt-3"
+        onclick={() => request?.generate(patientId, chartedIso)}
+      >
+        Explain this reading again
+      </Button>
+    {/if}
   </div>
 {/if}
