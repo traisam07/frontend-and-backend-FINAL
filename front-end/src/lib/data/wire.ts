@@ -118,6 +118,17 @@ export interface WireReading {
   risk_level: RiskLevel | null;
   /** Nullable: a reading that has not been reviewed has no review time. */
   review_at: IsoDateTime | null;
+  /**
+   * HOW MANY CONSECUTIVE READINGS THE PATIENT HAS BEEN AT `risk_level`, counted by the service that
+   * published the band. **G-32** asked whether the backend should supply this instead of the
+   * frontend walking `readings[]`, and a backend that runs a hysteresis machine is the only party
+   * that can answer it correctly: the frontend's walk can only count the readings it was SENT, so
+   * on the board, which carries one reading per patient, it always answers "at least 1".
+   *
+   * Nullable, and the walk in `heldAtLevel` remains the fallback, so a source that does not supply
+   * it behaves exactly as before.
+   */
+  readings_in_state: number | null;
   /** Ranked factors for THIS reading. Distinct from `WireWarningStatus.flags[].top_contributors`. */
   top_contributors: WireContributor[];
   parameters: WireParameterReading[];
@@ -134,6 +145,23 @@ export interface WireReading {
 
 export interface WirePatient {
   patient_id: string; // schema: required
+  /**
+   * BED IDENTITY. Not in `docs/patientSchema.js` and not carried by the fixture set, so it is
+   * nullable and its absence is never fatal: a source that does not know the bed says so, and the
+   * board renders the patient without one rather than dropping the patient.
+   *
+   * A bed number and a care unit are not patient identifiers. They name a place, and an ICU triage
+   * board that cannot say which bed is being talked about is a list, not a board (**G-06**).
+   */
+  bed_code: string | null;
+  /** The care unit the bed sits in: `MICU`, `SICU`, `CCU`. Nullable for the same reason. */
+  unit: string | null;
+  /**
+   * The id of the open review prompt, when one exists. It is the address a disposition is posted
+   * to, and it is NOT a clinical value: nothing renders it, nothing sorts on it. Nullable because
+   * most readings raise no prompt.
+   */
+  prompt_id: string | null;
   age: number; // schema: required
   gender: string; // schema: required, free text — display verbatim (G-20)
   /** schema: NOT required, and typed String, not Number. Units unknown — do not parse (**G-19**). */

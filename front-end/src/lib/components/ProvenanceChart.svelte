@@ -222,7 +222,7 @@
       role="img"
       viewBox="0 0 {VIEW_W} {VIEW_H}"
       class="h-auto w-full"
-      aria-label="{parameterName} charting provenance over the 60-minute window, {plotted.length} charted values of {points.length} readings. Charting provenance only — not a trend."
+      aria-label="{parameterName} charting provenance over the 24-hour window, {plotted.length} charted values of {points.length} readings. Charting provenance only — not a trend."
     >
       <g aria-hidden="true">
         {#each yTicks as tick, t (t)}
@@ -420,7 +420,7 @@
     <div id="{uid}-ptable" hidden={!tableOpen} class="mt-3 overflow-x-auto">
       <table class="w-full border-collapse text-sm">
         <caption class="pb-2 text-left text-sm text-fg-secondary">
-          Every reading in the 60-minute window. A reading that did not carry {parameterName} is listed
+          Every reading in the 24-hour window. A reading that did not carry {parameterName} is listed
           as a gap and is not plotted.
         </caption>
         <thead>

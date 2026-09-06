@@ -59,7 +59,9 @@ test('S-10 — an insufficient reading withholds the explanation and says the sc
 }) => {
   await page.goto('/patients/PT-2001');
   await expect(
-    page.getByRole('heading', { name: 'Insufficient data — risk score is not reliable' }),
+    page.getByRole('heading', {
+      name: 'Insufficient data — risk score is not reliable',
+    }),
   ).toBeVisible();
   // ONE region replaces BOTH PD-8 and PD-9 — S-10 mandates one heading for the pair, and an
   // earlier draft invented a second one for the references half.
@@ -77,10 +79,14 @@ test('S-10 null branch — unknown sufficiency uses its OWN heading, never `insu
 }) => {
   await page.goto('/patients/PT-2006');
   await expect(
-    page.getByRole('heading', { name: 'Data sufficiency unknown — risk score is not reliable' }),
+    page.getByRole('heading', {
+      name: 'Data sufficiency unknown — risk score is not reliable',
+    }),
   ).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Explanation withheld — data sufficiency unknown' }),
+    page.getByRole('heading', {
+      name: 'Explanation withheld — data sufficiency unknown',
+    }),
   ).toBeVisible();
   await expect(page.getByRole('heading', { name: /Guideline references withheld/ })).toHaveCount(0);
   // Retired spellings must never appear.
@@ -195,7 +201,9 @@ test('every parameter carries a real unit, adjacent to the value and marked as t
   page,
 }) => {
   await page.goto('/patients/PT-1001');
-  const table = page.getByRole('region', { name: 'Respiratory parameters, scrollable' });
+  const table = page.getByRole('region', {
+    name: 'Respiratory parameters, scrollable',
+  });
   await expect(table).toBeVisible();
 
   // Rule 15: the unit is in the CELL, in the same nowrap element as the value — never in the column
@@ -371,7 +379,9 @@ test('U-12 — a patient with colliding charttimes renders on ALL THREE screens'
   // The collision is SURFACED, not deduped away.
   await expect(page.locator('summary', { hasText: 'Data integrity' })).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: '60-minute respiratory-risk history' }),
+    page.getByRole('heading', {
+      name: 'Respiratory-risk score · last 24 hours',
+    }),
   ).toBeVisible();
 
   // The BOARD renders it too. There is no selected-patient panel any more (**D-22**): the card is
@@ -490,12 +500,12 @@ test('rule 15 — the risk score carries its unit, in the same nowrap element', 
   expect(nowrapHoldsBoth, 'value and unit must share one nowrap element').toBe(true);
 });
 
-test('the 60-minute chart plots no number a reading never carried', async ({ page }) => {
+test('the risk history chart plots no number a reading never carried', async ({ page }) => {
   // The y-axis midpoint tick was `Math.round(((low + high) / 2) * 100) / 100` — a score-shaped value
   // no reading ever held, rounded to 2dp on an axis where every real score is verbatim, and an
   // interpolation (rule 17) that implies an interval scale nobody has declared (G-12).
   await page.goto('/patients/PT-1001');
-  const chart = page.getByRole('region', { name: /60-minute respiratory-risk history/ });
+  const chart = page.getByRole('region', { name: /Respiratory-risk score/ });
   await expect(chart).toBeVisible();
 
   // The data table is always in the DOM but collapsed behind its own disclosure button.

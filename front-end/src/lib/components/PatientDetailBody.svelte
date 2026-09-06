@@ -34,6 +34,7 @@
   import AbsoluteTime from './AbsoluteTime.svelte';
   import { getTriageBoard } from '$lib/state/context';
   import ExplanationSection from './ExplanationSection.svelte';
+  import { ExplanationRequest } from '$lib/state/explanation.svelte';
   import GuidelineReferencesSection from './GuidelineReferencesSection.svelte';
   import InsufficientChip from './InsufficientChip.svelte';
   import IntegrityWarnings from './IntegrityWarnings.svelte';
@@ -64,6 +65,15 @@
   const board = getTriageBoard();
 
   const latest = $derived(latestReading(snapshot.readings));
+
+  /**
+   * ONE GENERATION, SHARED BY PD-8 AND PD-9. Created here because this is the nearest ancestor of
+   * both: owned inside either panel the result would be unreachable from the other, and the
+   * references would fill from a second lookup that can disagree with the prose beside it.
+   *
+   * Per component tree, never a module singleton: it holds generated prose about one patient.
+   */
+  const request = new ExplanationRequest();
 
   /**
    * When this patient was marked reviewed ON THIS SCREEN, or `undefined`. Read from the board rather
@@ -191,8 +201,8 @@
       <p class="text-lg font-semibold">No assessment available for this patient</p>
       <p class="max-w-[52ch] text-body">
         This patient has no reading with a usable timestamp, so there is no current score, no risk
-        band, no 60-minute history, no ranked factors and no parameter table to show. This is not a
-        score of zero and not a low-risk finding.
+        band, no risk history, no ranked factors and no parameter table to show. This is not a score
+        of zero and not a low-risk finding.
       </p>
     </section>
   {:else}
@@ -226,7 +236,7 @@
 
     <!-- READING ORDER CHANGES WITH THE WIDTH, and no content moves in or out.
          On a phone the SCORE and the reading state are what a clinician opens this screen for, so
-         they lead in the DOM. From `lg` there is room for two columns and the 60-minute history
+         they lead in the DOM. From `lg` there is room for two columns and the risk history
          takes the wide one, so `order` sends the score column to the right. Screen readers and
          keyboard users follow the DOM, which is the mobile order — the one that puts the number
          and its caveat first.
@@ -280,9 +290,31 @@
              `sm` (the score panel's own narrowest width, on a phone) it still stacks: there is no
              room for a second column once the panel itself is under ~400px. -->
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
-          <div class="flex shrink-0 flex-col gap-2 sm:w-32">
+          <!-- ⚠️ `sm:w-44`, NOT `sm:w-32`, and the number is measured rather than guessed.
+               128px was sized for a hero like `87.7%`. A calibrated probability is `0.xxxx`, six
+               glyphs, and at `text-hero` its rendered width is 156px: measured in the browser as
+               `scrollWidth` on the numeral, not estimated. The box clamped to 128 while the glyphs
+               painted to 156, so the number overflowed its own column by 28px and ran 16px into the
+               explanation beside it. `tabular-nums` is what makes one measurement enough: every
+               score is exactly this wide.
+
+               176px, so the worst case clears with 20px of slack rather than sitting one rounding
+               away from touching again. -->
+          <div class="flex shrink-0 flex-col gap-2 sm:w-44">
+            <!-- ⚠️ THE UNIT SITS UNDER THE NUMBER, NOT BESIDE IT, and that changed on 2026-08-28
+                 when the unit stopped being `%`.
+
+                 This column is `sm:w-32`, 128px, and it was sized for a hero like `87.7%`: four
+                 digits at 48px plus one character. `0.4094 probability (0-1)` is roughly 230px in
+                 the same box, the number's span is `whitespace-nowrap` so it cannot break, and the
+                 first live run rendered the prose beside it straight over the top of the numeral.
+
+                 Stacking keeps rule 15 intact. The number and its unit are still one block, so
+                 neither a line break, a screenshot crop nor a copy-paste can take the number without
+                 the unit, and the `whitespace-nowrap` span still prevents a break INSIDE either. It
+                 is only the join between them that now falls on a new line. -->
             <p
-              class="flex items-baseline gap-3 text-value font-semibold tabular-nums md:text-hero"
+              class="flex flex-col text-value font-semibold tabular-nums md:text-hero"
               aria-describedby={latest.sufficientData !== 'sufficient'
                 ? `${uid}-suff-body`
                 : undefined}
@@ -297,10 +329,9 @@
                      nowrap element as the value, so the number cannot be screenshotted, read aloud
                      or pasted into a note without it. Same shared constant as the chart — one owner,
                      one spelling. -->
-                <span class="whitespace-nowrap"
-                  >{latest.riskScore}<span class="text-sm font-normal text-fg-muted"
-                    >{RISK_SCORE_UNIT}</span
-                  ></span
+                <span class="whitespace-nowrap leading-none">{latest.riskScore}</span>
+                <span class="text-sm leading-tight font-normal whitespace-nowrap text-fg-muted"
+                  >{RISK_SCORE_UNIT}</span
                 >
               {:else}
                 <!-- STATE S-35. Never `0`, never blank, never a bare em dash. -->
@@ -346,7 +377,7 @@
                now renders below PD-10 (`GuidelineReferencesSection`). `min-w-0` so its prose wraps
                instead of forcing the row wider than the panel. -->
           <div class="min-w-0 flex-1 sm:border-l sm:border-border-subtle sm:pl-4">
-            <ExplanationSection reading={latest} />
+            <ExplanationSection reading={latest} {request} patientId={snapshot.patientId} />
           </div>
         </div>
       </section>
@@ -478,9 +509,9 @@
         </dl>
       </section>
 
-      <!-- PD-4 — 60-minute respiratory-risk history. Second on a phone (see the wrapper comment),
+      <!-- PD-4 — respiratory-risk history over the last 24 hours. Second on a phone (see the wrapper comment),
            first in the left column from `xl`. -->
-      <!-- The 60-minute history says WHEN this reading was reviewed, because "has this been looked
+      <!-- The risk history says WHEN this reading was reviewed, because "has this been looked
            at" is the question a clinician brings to a trend. The two sources are labelled apart: a
            mark made on this screen is local and unsaved, and saying so beside the time is the only
            thing stopping it reading as a recorded review (RULE TWO). -->
@@ -504,7 +535,7 @@
 
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="{uid}-history" class="text-lg font-semibold">
-            Respiratory-risk score · last 60 minutes
+            Respiratory-risk score · last 24 hours
           </h2>
 
           {#if markedHere !== undefined}
@@ -515,7 +546,20 @@
               <span class="font-semibold text-fg">
                 Marked reviewed <AbsoluteTime iso={markedHere.toISOString()} />
               </span>
-              <span>on this screen — not saved to the patient record</span>
+              <!-- ⚠️ WHICH OF THE TWO MARKS THIS WAS. Both paths set the same flag in `ReviewLog`,
+                   so this line asserted "not saved to the patient record" over a review that HAD
+                   been recorded, on the same screen where the panel above it correctly said it was.
+                   Two statements about one event, one of them false.
+
+                   A prompt is the address a disposition is posted to, so `promptId !== null` is
+                   exactly the condition under which `ReviewPanel` takes the write path, and it only
+                   reaches `markReviewed` when that write came back accepted. Derived, not a second
+                   piece of state that could drift from the first. -->
+              {#if snapshot.promptId !== null}
+                <span>recorded against this reading's review prompt</span>
+              {:else}
+                <span>on this screen — not saved to the patient record</span>
+              {/if}
             </p>
           {:else if latest.reviewAt !== null}
             <!-- Reported by the assessment data, which is a different fact and says so. -->
@@ -539,14 +583,14 @@
             isLive={liveSource}
           />
         {:else}
-          <!-- F-2: below two plotted points there is no 60-minute view, and a single point is never
+          <!-- F-2: below two plotted points there is no history view, and a single point is never
                drawn as a flat line. The literal is F-2's own. `bg-chart-plot-bg`, not
                `bg-surface-sunken`, 2026-08-23: this box stands in for the chart itself, so it takes
                the same lightened background the chart now uses, for the same reason. -->
           <p
             class="flex min-h-40 items-center justify-center rounded-md border border-dashed border-border bg-chart-plot-bg p-4 text-center text-body text-fg-secondary"
           >
-            insufficient history for a 60-minute view
+            insufficient history for a 24-hour view
           </p>
         {/if}
       </section>
@@ -669,7 +713,7 @@
          (`routes/patients/[patientId]/+page.svelte`): an element that renders nothing must occupy
          nothing, or `gap-4`/`gap-5` on this column still reserves a row for it. -->
     {#if latest.sufficientData === 'sufficient'}
-      <GuidelineReferencesSection reading={latest} />
+      <GuidelineReferencesSection reading={latest} {request} />
     {/if}
   {/if}
 </div>

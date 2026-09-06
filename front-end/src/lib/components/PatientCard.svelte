@@ -145,6 +145,22 @@
              column (L-083). -->
         <span class="sr-only">Patient</span>
         <span class="break-words">{patient.patientId}</span>
+        <!-- BED AND CARE UNIT, under the identifier and in the muted secondary weight.
+             A triage board for an ICU whose rows cannot say which bed is being talked about is a
+             list, not a board: the identifier tells a clinician WHICH patient, and the bed tells
+             them WHERE to walk. It sits under rather than beside the id because the id is what the
+             eye scans down and a second string on that baseline competes with it.
+
+             Rendered only when the source supplies it. The fixture set and the handoff backend
+             carry no bed, so the slot is simply absent there rather than showing a dash, an empty
+             box or an invented number (rule 14, and `screens.md` section 9's ban on rendering a
+             missing value as a normal-looking one). -->
+        {#if patient.bedCode !== null || patient.careUnit !== null}
+          <span class="block text-micro font-normal text-fg-muted">
+            <span class="sr-only">Bed</span>
+            {[patient.bedCode, patient.careUnit].filter((part) => part !== null).join(' · ')}
+          </span>
+        {/if}
       </span>
       <span
         class="flex min-w-0 flex-wrap items-center gap-2 md:col-start-2 md:row-start-1 lg:contents"

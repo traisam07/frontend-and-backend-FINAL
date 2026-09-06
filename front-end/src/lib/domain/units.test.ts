@@ -86,6 +86,7 @@ describe('toParameterRows carries the unit and says where it came from', () => {
     const parameter: ParameterReading = {
       name,
       slug: 'x',
+      unit: null,
       value: 22,
       source: 'measured',
       lastMeasured: { kind: 'unavailable', reason: 'not_applicable' },
@@ -98,6 +99,7 @@ describe('toParameterRows carries the unit and says where it came from', () => {
       sufficientData: 'sufficient',
       imputedShare: 0,
       documentationShare: 0,
+      readingsInState: null,
       explanation: null,
       citations: [],
       topContributors: [],

@@ -186,7 +186,7 @@
    * ~FIVE EVENLY SPACED X-AXIS TIME TICKS, 2026-08-23, replacing the old first/last-only pair. The
    * five INSTANTS are a plain linear interpolation between the first and last PLOTTED point's own
    * real timestamp — never a fabricated reading, only axis chrome, the same category as the y-tick
-   * numbers above. `formatClockTime` prints `HH:mm` only: no date, no zone label, because a 60-minute
+   * numbers above. `formatClockTime` prints `HH:mm` only: no date, no zone label, because a 24-hour
    * window never crosses either.
    */
   const xTicks = $derived.by(() => {
@@ -266,7 +266,7 @@
       role="img"
       viewBox="0 0 {VIEW_W} {VIEW_H}"
       class="h-auto w-full"
-      aria-label="Respiratory risk score, last 60 minutes, {points.length} plotted readings, ending {points.at(
+      aria-label="Respiratory risk score, last 24 hours, {points.length} plotted readings, ending {points.at(
         -1,
       )
         ?.absTime}. Fixed 0-{RISK_SCORE_DOMAIN.max} axis, with reference lines at medium {thresholds.medium},
@@ -508,7 +508,7 @@
     >
       <table class="w-full border-collapse text-sm">
         <caption class="pb-2 text-left text-sm text-fg-secondary">
-          Every reading in the 60-minute window. Readings with no risk score are listed and are not
+          Every reading in the 24-hour window. Readings with no risk score are listed and are not
           plotted.
         </caption>
         <thead>

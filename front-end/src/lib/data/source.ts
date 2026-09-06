@@ -36,6 +36,7 @@ import type { PatientSnapshot, PatientSummary } from '$lib/domain/types';
 import type { Parsed } from '$lib/data/validate';
 import { parsePatientList, parsePatientSnapshot } from '$lib/data/validate';
 import { toPatientSummary } from '$lib/domain/derive';
+import { getPulsemindSource } from '$lib/data/pulsemind-source';
 
 export interface PatientDataSource {
   listPatients(signal?: AbortSignal): Promise<Parsed<readonly PatientSummary[]>>;
@@ -56,7 +57,10 @@ export interface PatientDataSource {
  * is readable because `export const prerender = true` is banned on every route: a prerendered page
  * has no dynamic environment to read.
  */
-const API_BASE = (env.PUBLIC_PULSEMIND_API_BASE ?? 'http://localhost:3500').replace(/\/+$/, '');
+export const API_BASE = (env.PUBLIC_PULSEMIND_API_BASE ?? 'http://localhost:3500').replace(
+  /\/+$/,
+  '',
+);
 
 /** The three fragments section 4.1 records. */
 type Fragment = 'info' | 'warning' | 'reading';
@@ -66,7 +70,7 @@ type Fragment = 'info' | 'warning' | 'reading';
  * `validate.ts`: the composition has to spread the info fragment, and exporting four tokens from the
  * validator would put a second boundary primitive in the symbol table for no gain.
  */
-function isRecord(x: unknown): x is Record<string, unknown> {
+export function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
 }
 
@@ -110,7 +114,7 @@ const FRAGMENT_TIMEOUT_MS = 10_000;
  * answered in the backend. They deliberately mirror the mandated fragment shapes word for word so
  * the two read as one family.
  */
-interface RequestScope {
+export interface RequestScope {
   /** Used mid-sentence after a verb: "did not answer the …", "rejected the …". */
   readonly noun: string;
   /** Used as the subject: "The … was not valid JSON", "The … was cancelled …". */
@@ -153,11 +157,21 @@ function namedTransportFailure(cause: unknown, scope: RequestScope): never {
  * one failure mode this app exists to prevent. So every branch below is on `res.status`, and the
  * body is read on the last line or not at all.
  */
-async function readJson(
+export async function readJson(
   fetch: typeof globalThis.fetch,
   url: string,
   scope: RequestScope,
   signal: AbortSignal | undefined,
+  /**
+   * Called with the raw `Response` the instant it arrives, BEFORE any status branch and before any
+   * body is read. It exists so the telemetry panel can read `Server-Timing` and `X-Request-Id` off
+   * a response this function is about to turn into a thrown, named failure: hooking the success path
+   * only would have made the log show every call that worked and none that did not, which is the
+   * opposite of what a diagnostic panel is for.
+   *
+   * It must not throw and must not read the body. It is not given one.
+   */
+  onResponse?: (res: Response) => void,
 ): Promise<unknown> {
   // THE DEADLINE, composed here rather than demanded of every caller. `AbortSignal.timeout` aborts
   // with a `TimeoutError`; a caller's own signal aborts with an `AbortError`; `AbortSignal.any`
@@ -172,6 +186,8 @@ async function readJson(
     signal: until,
     headers: { accept: 'application/json' },
   }).catch((cause: unknown): never => namedTransportFailure(cause, scope));
+
+  onResponse?.(res);
 
   /* ---- STATUS FIRST. Nothing below this line has read a body. ---------------------------------- */
 
@@ -214,11 +230,12 @@ async function readJson(
 
   // `unknown` on purpose: the validator is the only thing allowed to give this a shape, and
   // `await res.json() as WirePatient` is forbidden. Malformed JSON is named too.
-  const body: unknown = await res
-    .json()
-    .catch((): never =>
-      error(502, { message: `The ${scope.forWhat} was not valid JSON`, code: 'UPSTREAM_ERROR' }),
-    );
+  const body: unknown = await res.json().catch((): never =>
+    error(502, {
+      message: `The ${scope.forWhat} was not valid JSON`,
+      code: 'UPSTREAM_ERROR',
+    }),
+  );
   return body;
 }
 
@@ -470,7 +487,10 @@ export function getFixturePatientSource(): PatientDataSource {
       if (match === undefined) {
         // The same named failure the HTTP source raises for a 404, so a deep link to an unknown id
         // renders identically whichever source is selected.
-        error(404, { message: `No patient matches id ${patientId}`, code: 'PATIENT_NOT_FOUND' });
+        error(404, {
+          message: `No patient matches id ${patientId}`,
+          code: 'PATIENT_NOT_FOUND',
+        });
       }
       const parsed = parsePatientSnapshot(match);
       if (!parsed.ok) return parsed; // U-21, exactly as a bad payload would be
@@ -502,7 +522,9 @@ export function getFixturePatientSource(): PatientDataSource {
  * be reached.
  */
 export function isLiveSource(): boolean {
-  return env.PUBLIC_PULSEMIND_DATA_SOURCE === 'http';
+  return (
+    env.PUBLIC_PULSEMIND_DATA_SOURCE === 'http' || env.PUBLIC_PULSEMIND_DATA_SOURCE === 'pulsemind'
+  );
 }
 
 /**
@@ -520,5 +542,9 @@ export function isLiveSource(): boolean {
  * about which one produced what is on screen.
  */
 export function resolvePatientSource(fetch: typeof globalThis.fetch): PatientDataSource {
-  return isLiveSource() ? getPatientSource(fetch) : getFixturePatientSource();
+  // Exact strings, never truthiness, and never a fall-through: an unrecognised value selects
+  // fixtures, which is the direction that renders rather than filling the screen with named errors.
+  if (env.PUBLIC_PULSEMIND_DATA_SOURCE === 'pulsemind') return getPulsemindSource(fetch);
+  if (env.PUBLIC_PULSEMIND_DATA_SOURCE === 'http') return getPatientSource(fetch);
+  return getFixturePatientSource();
 }

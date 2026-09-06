@@ -66,7 +66,10 @@ export type ModelUse = 'score_factor' | 'available' | 'unknown';
  */
 export type Known<T> =
   | { kind: 'value'; value: T }
-  | { kind: 'unavailable'; reason: 'not_provided' | 'not_applicable' | 'invalid' | 'withheld' };
+  | {
+      kind: 'unavailable';
+      reason: 'not_provided' | 'not_applicable' | 'invalid' | 'withheld';
+    };
 
 /**
  * Canonical in `docs/spec/data-contract.md` section 1.6. The memoization key for the board ranking
@@ -92,6 +95,16 @@ export interface ParameterReading {
    * it, 'invalid' when it did not parse, 'not_applicable' on a population reference.
    */
   lastMeasured: Known<Date>;
+  /**
+   * THE UNIT THE SERVICE SUPPLIED, or null when it supplied none (**G-01**).
+   *
+   * When it is present it is a measured fact about the quantity and the asserted table in
+   * `$lib/domain/units` is not consulted. When it is null the app falls back to that table, and to
+   * the `unit not supplied` marker for a quantity the table does not know. The two cases are
+   * distinguished on screen: a supplied unit carries no `data-clarify` marker, because there is
+   * nothing left to clarify.
+   */
+  unit: string | null;
   /** Never inferred as 'available'. Absence from top_contributors proves nothing (F-8). */
   modelUse: ModelUse;
 }
@@ -137,11 +150,17 @@ export interface Reading {
   explanation: string | null;
   citations: ReadonlyArray<{ name: string; claim: string }> | null;
   reviewAt: Date | null;
+  /**
+   * The publisher's own run length at `riskLevel`, or null when the source does not supply one
+   * (**G-32**). Preferred over the client-side walk because only the publisher can see the readings
+   * that were not sent.
+   */
+  readingsInState: number | null;
 }
 
 /**
  * A reading whose `charttime` parsed. Only these take part in latest-reading selection (F-1), the
- * 60-minute window and the held-at-level run, so the ordering helpers hand back this type and
+ * risk-history window and the held-at-level run, so the ordering helpers hand back this type and
  * downstream code never has to re-check `charttime`.
  */
 export type TimedReading = Reading & { charttime: Date };
@@ -168,6 +187,18 @@ export type HeldAtLevel =
 
 export interface PatientSummary {
   patientId: string;
+  /** Bed and care unit, null when the source does not know them. Never invented, never defaulted. */
+  bedCode: string | null;
+  careUnit: string | null;
+  /**
+   * The open review prompt's id, or null. Not a clinical value and never rendered.
+   *
+   * It is here so a mark made in this session can be described truthfully. A patient with a prompt
+   * gets a RECORDED review; one without gets a local, unsaved mark. Both set the same flag in
+   * `ReviewLog`, so without this the two are indistinguishable and the review history asserts
+   * "not saved to the patient record" over a review that was saved.
+   */
+  promptId: string | null;
   reviewStatus: ReviewStatus;
   riskLevel: RiskLevel | null; // S-05
   /**
@@ -195,6 +226,11 @@ export interface PatientSummary {
 
 export interface PatientSnapshot {
   patientId: string;
+  /** See `WirePatient.bed_code`. Nullable: absence is a state, not a failure. */
+  bedCode: string | null;
+  careUnit: string | null;
+  /** Address for a review disposition, or null when no prompt is open. Not a clinical value. */
+  promptId: string | null;
   age: number;
   gender: string;
   /** verbatim String in the schema; no unit is appended, no parsing (G-19) */
@@ -252,7 +288,7 @@ export interface ParameterRowVm {
 }
 
 /**
- * One plotted mark of the 60-minute risk-history series (F-2), projected from a `TimedReading` by
+ * One plotted mark of the risk-history series (F-2), projected from a `TimedReading` by
  * `toChartPoints` — its only producer. A reading whose `riskScore` is `null` produces NO
  * `ChartPoint` at all: F-2 omits it from the plotted line, and `y` being a plain `number` means
  * there is nowhere for a `0` to be substituted even by accident. That reading is still the S-35

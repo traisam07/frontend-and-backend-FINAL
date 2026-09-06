@@ -24,6 +24,7 @@
   import { reviewLabel } from '$lib/domain/derive';
   import { TriageBoard } from '$lib/state/triage.svelte';
   import { setTriageBoard, getReviewLog } from '$lib/state/context';
+  import { observeWardInstants } from '$lib/state/ward-clock.svelte';
   import { getAnnouncer } from '$lib/a11y/announcer.svelte';
   import PatientCard from '$lib/components/PatientCard.svelte';
   import InsufficientChip from '$lib/components/InsufficientChip.svelte';
@@ -97,6 +98,14 @@
   // `$derived`, never a plain const: SvelteKit reuses page components across navigation, so a const
   // would keep rendering the previous board.
   const patients = $derived(data.patients);
+
+  // PUBLISH THE WARD'S NEWEST INSTANT so the app clock can follow it. A `$effect` rather than a
+  // `$derived` because the READER is the root layout and this is a route component far below it:
+  // Svelte context reads downward only, so no derivation can see both ends. It writes one number,
+  // no clinical value is computed from it, and it is idempotent.
+  $effect(() => {
+    observeWardInstants(patients.map((p) => p.latestChartTime));
+  });
 
   // The board owns query, filter, selection and the local review set. It reads clinical data through
   // a GETTER, so it never owns a copy that can go stale.

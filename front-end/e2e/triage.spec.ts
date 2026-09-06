@@ -93,8 +93,10 @@ test('marking a patient reviewed puts it in the review history, with the time an
   await expect(page).toHaveURL(/\/patients\/PT-1001/);
   await page.getByRole('button', { name: 'Mark as reviewed' }).click();
 
-  // The 60-minute history says WHEN, and says it was not saved.
-  const history = page.getByRole('region', { name: '60-minute respiratory-risk history' });
+  // The risk history says WHEN, and says it was not saved.
+  const history = page.getByRole('region', {
+    name: 'Respiratory-risk score · last 24 hours',
+  });
   await expect(history).toContainText('Marked reviewed');
   await expect(history).toContainText('not saved to the patient record');
 

@@ -32,13 +32,40 @@ export function orderByChartTimeAsc(readings: readonly Reading[]): readonly Time
 }
 
 /**
- * The 60-minute window is anchored on the LATEST READING'S charttime, not on `Date.now()`.
- * Anchoring on the wall clock lets stale data render as a reassuring empty chart.
+ * HOW WIDE THE RISK HISTORY WINDOW IS.
+ *
+ * ⚠️ F-2 SAID SIXTY MINUTES, AND SIXTY MINUTES IS THE WRONG WIDTH FOR THIS BACKEND. Changed to a day
+ * on 2026-08-28 by the product owner, with the reason recorded rather than the number alone.
+ *
+ * The live service advances the ward ONE HOUR per reading, and that interval is not adjustable: the
+ * band table's dwell clock is denominated on the same grid, its demote dwell is 120 minutes, and the
+ * published band trajectory was verified against it. So a 60-minute window admits the latest reading
+ * and, at the boundary, the one before it. A named main section on two screens plots one line
+ * segment and otherwise renders the insufficient-history literal, for ever, on every patient.
+ *
+ * A day is the width the data actually supports: the service backfills 24 hourly readings and serves
+ * up to 200. Twenty-four readings span 23 hours, comfortably inside this window, so the newest and
+ * oldest marks can never land on the same `HH:mm` axis label.
+ *
+ * The number lives here, once, and every caller and every rendered string reads it rather than
+ * spelling out a duration of its own.
+ */
+export const RISK_WINDOW_MINUTES = 24 * 60;
+
+/** The same width in words, for the surfaces that name it. One spelling, one owner. */
+export const RISK_WINDOW_LABEL = 'last 24 hours';
+
+/**
+ * The window is anchored on the LATEST READING'S charttime, not on `Date.now()`. Anchoring on the
+ * wall clock lets stale data render as a reassuring empty chart.
  *
  * Returns ASCENDING, per F-2 — `ChartPoint[]` is built from it positionally, and a consumer that
  * reversed it would label the oldest point as "ending".
  */
-export function windowOf(readings: readonly Reading[], minutes = 60): readonly TimedReading[] {
+export function windowOf(
+  readings: readonly Reading[],
+  minutes = RISK_WINDOW_MINUTES,
+): readonly TimedReading[] {
   const ordered = orderByChartTimeAsc(readings);
   // Take the element, do not index. `if (ordered.length === 0)` does NOT narrow `ordered[0]` under
   // noUncheckedIndexedAccess — it stays `TimedReading | undefined`.

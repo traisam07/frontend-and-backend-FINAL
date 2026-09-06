@@ -97,7 +97,14 @@ export default defineConfig({
       '/api': {
         target: API_TARGET,
         changeOrigin: false,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        // ⚠️ NO REWRITE. The handoff backend mounts its routes at the ROOT (`/patient/...`),
+        // so the `/api` prefix had to be stripped on the way through. The live PulseMind service
+        // mounts everything UNDER `/api`, so stripping it would 404 every request in the app. The
+        // prefix is part of the path the service actually serves and it is forwarded verbatim.
+        //
+        // If this is ever pointed back at a root-mounted service the rewrite comes back here, and
+        // `PUBLIC_PULSEMIND_API_BASE` does not change: which of the two is running is a property
+        // of the target, not of the app.
         // STRIP `Origin` ON THE WAY THROUGH. The browser sends it on every non-GET request even when
         // the request is same-origin, so forwarding it makes the service run a CORS check on a
         // request that is no longer cross-origin — and refuse it with "Not allowed by CORS" unless
@@ -129,7 +136,14 @@ export default defineConfig({
       '/api': {
         target: API_TARGET,
         changeOrigin: false,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        // ⚠️ NO REWRITE. The handoff backend mounts its routes at the ROOT (`/patient/...`),
+        // so the `/api` prefix had to be stripped on the way through. The live PulseMind service
+        // mounts everything UNDER `/api`, so stripping it would 404 every request in the app. The
+        // prefix is part of the path the service actually serves and it is forwarded verbatim.
+        //
+        // If this is ever pointed back at a root-mounted service the rewrite comes back here, and
+        // `PUBLIC_PULSEMIND_API_BASE` does not change: which of the two is running is a property
+        // of the target, not of the app.
         // STRIP `Origin` ON THE WAY THROUGH. The browser sends it on every non-GET request even when
         // the request is same-origin, so forwarding it makes the service run a CORS check on a
         // request that is no longer cross-origin — and refuse it with "Not allowed by CORS" unless

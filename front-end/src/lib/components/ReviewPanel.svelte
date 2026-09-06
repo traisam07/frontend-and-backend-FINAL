@@ -7,12 +7,27 @@
      `parameters[]`, `explanation`, or `citations`, and it must not trigger a refetch. It WILL change
      the patient's K1 ranking key, which is correct.
 
+     TWO PATHS, AND THE PANEL SAYS WHICH ONE IT TOOK. **G-08 was answered on 2026-08-28**: the live
+     service persists a disposition against an open prompt. A source that supplies a `promptId` gets
+     the write; a source that does not (the fixtures, the handoff backend) keeps the original
+     local-only behaviour unchanged. The two are never worded alike.
+
      THE ONE LITERAL for the local mark is `Marked locally in this session — not saved to the record`,
      rendered as its own phrase between the review state and the locally-generated timestamp.
      `Recorded in this session`, `locally marked, not persisted` and
-     `Reviewed · recorded in this session at <time>` are retired spellings. There is no "Saved"
-     toast and no server-write checkmark: the persistence contract is open (**G-08**), so "saved" and
-     "persisted" stay banned.
+     `Reviewed · recorded in this session at <time>` are retired spellings. On that path there is
+     still no "Saved" toast and no server-write checkmark.
+
+     ON THE WRITTEN PATH THE COPY STATES WHAT IS ACTUALLY TRUE, AND NO MORE. The service stores the
+     disposition, the note, the wall-clock instant and the ward's own clock at that instant. It
+     stores NO CLINICIAN: `clinician` is null and `attributed` is false, because nothing
+     authenticates the caller and the handler deliberately ignores any name in the request body. A
+     disposition that named whoever asked for it would not be an audit record. So the panel says
+     `recorded, not attributed to a named clinician` and never `saved by you`. The wording is
+     `[PROPOSED]` under **D-10** until the owner confirms it.
+
+     RULE TWO IS UNCHANGED BY EITHER PATH. The write posts a disposition and nothing else; it cannot
+     alter a score, a band or any other clinical field, and it triggers no refetch.
 
      The panel is NOT `role="alert"` — it is present on load, and alerts are for changes. It is a
      plain `<h2>` so it appears in the heading list. -->
@@ -27,6 +42,7 @@
   import AbsoluteTime from './AbsoluteTime.svelte';
   import ReviewGlyph from './ReviewGlyph.svelte';
   import Button from './Button.svelte';
+  import { postDisposition, type Disposition } from '$lib/data/pulsemind-source';
 
   let {
     snapshot,
@@ -34,6 +50,14 @@
      *  `review_at` is per reading — the split is **G-15**, and neither field silently wins. */
     reviewAt,
   }: { snapshot: PatientSnapshot; reviewAt: Date | null } = $props();
+
+  /**
+   * WHETHER THIS PATIENT HAS SOMEWHERE TO WRITE TO. A disposition is recorded against an OPEN
+   * PROMPT, so a patient with no prompt has no address and the panel keeps the local-only path. It
+   * is not a source selector: a live board whose prompt is already reviewed is in exactly the same
+   * position as a fixture, and both say local.
+   */
+  const promptId = $derived(snapshot.promptId);
 
   const clock = getAppClock();
   const board = getTriageBoard();
@@ -49,14 +73,77 @@
   /** Locally generated, and labelled as such on the very next line. Never a fabricated backend time. */
   let markedAt = $state<Date | null>(null);
 
-  function markReviewed() {
-    // The clock the rest of the app reads, never `new Date()` inside a component (rule 12).
+  /** True once the write has come back accepted. Distinct from `markedAt`, which is local. */
+  let recorded = $state(false);
+  /** STATE U-15, and the mark is NOT applied while it is set. */
+  let writeFailure = $state<string | null>(null);
+  let writing = $state(false);
+  let lastDisposition = $state<Disposition | null>(null);
+
+  /**
+   * The three dispositions offered beside `Mark as reviewed`.
+   *
+   * `acknowledged` is what `Mark as reviewed` has always meant: a clinician has SEEN the reading.
+   * The other three say what they DID about it, and they are secondary because the handoff mandates
+   * one action on this panel and these are an addition to it, not a replacement.
+   */
+  const SECONDARY: readonly Disposition[] = ['actioned', 'escalated', 'dismissed'];
+
+  /**
+   * ONE MAP, one spelling per disposition, for both the spoken announcement and the rendered label.
+   * There were two: this map and `SECONDARY`'s `label`, plus a third form generated at render time
+   * by upper-casing the first character. Three sources for one set of strings, in a panel whose
+   * whole discipline is one literal per state.
+   */
+  const SPOKEN: Readonly<Record<Disposition, { spoken: string; label: string }>> = {
+    acknowledged: { spoken: 'acknowledged', label: 'Reviewed' },
+    actioned: { spoken: 'actioned', label: 'Actioned' },
+    escalated: { spoken: 'escalated', label: 'Escalated' },
+    dismissed: { spoken: 'dismissed', label: 'Dismissed' },
+  };
+
+  async function markReviewed(disposition: Disposition = 'acknowledged') {
+    if (writing) return;
+    writeFailure = null;
+
+    // NO PROMPT, NO ADDRESS. The original local-only behaviour, unchanged, and the copy says so.
+    if (promptId === null) {
+      // ONE CLOCK FOR ONE EVENT. Both lines describe the same click, and they used to read two
+      // different clocks: `clock.now` is the app clock, which follows the WARD and can be hours
+      // ahead while it streams, and `new Date()` is the wall clock. The two then rendered in
+      // different places and disagreed by hours. The mark is a ward-time fact, because that is the
+      // timeline every other value on the screen is on.
+      board.markReviewed(snapshot.patientId, clock.now);
+      markedAt = clock.now;
+      // The announcement repeats the mandated local-mark literal rather than paraphrasing it, so a
+      // screen-reader user hears the same caveat a sighted one reads.
+      announcer.say(
+        `Patient ${snapshot.patientId} marked as reviewed. Marked locally in this session — not saved to the record.`,
+      );
+      return;
+    }
+
+    writing = true;
+    const result = await postDisposition(fetch, promptId, disposition, null);
+    writing = false;
+
+    if (!result.ok) {
+      // U-15, and the mark is deliberately NOT applied: showing a reviewed patient whose review
+      // exists nowhere is the failure this branch is for. The row stays pending and says why.
+      writeFailure =
+        result.problem ?? 'The review could not be recorded. The reading is still awaiting review.';
+      announcer.say(
+        `The review for patient ${snapshot.patientId} could not be recorded. It is still awaiting review.`,
+      );
+      return;
+    }
+
     board.markReviewed(snapshot.patientId, clock.now);
-    markedAt = new Date();
-    // The announcement repeats the mandated local-mark literal rather than paraphrasing it, so a
-    // screen-reader user hears the same caveat a sighted one reads.
+    markedAt = clock.now;
+    recorded = true;
+    lastDisposition = disposition;
     announcer.say(
-      `Patient ${snapshot.patientId} marked as reviewed. Marked locally in this session — not saved to the record.`,
+      `Patient ${snapshot.patientId} recorded as ${SPOKEN[disposition].spoken}. Recorded in the patient record, not attributed to a named clinician.`,
     );
   }
 
@@ -93,7 +180,26 @@
           <p class="mt-1 text-body">Marking the review</p>
         {:else if status === 'reviewed'}
           <p class="mt-1 text-body">
-            {#if markedLocally}
+            {#if recorded}
+              <!-- WRITTEN. The disposition is in the patient record, and the sentence stops exactly
+                   where the evidence does: the service stores no clinician, so nothing here claims
+                   one. `recorded` is set only after the write came back accepted, so this wording
+                   can never appear for a mark that failed or was never sent. -->
+              {lastDisposition === null ? 'Reviewed' : SPOKEN[lastDisposition].label}
+              · Recorded in the patient record, not attributed to a named clinician ·
+              <!-- ⚠️ THE TIME WAS COMPUTED AND THROWN AWAY. This branch set `markedAt` and then
+                   ended on a separator with nothing after it, so the new happy path rendered
+                   `Escalated · Recorded in the patient record, not attributed to a named clinician ·`
+                   and stopped. Rule 15 requires an absolute time at every display point, and the two
+                   sibling branches below both carry one. -->
+              {#if markedAt !== null}
+                <time datetime={toDateTimeAttribute(markedAt)} class="tabular-nums"
+                  >{formatAbsolute(markedAt, clock.now)}</time
+                >
+              {:else}
+                review time not recorded
+              {/if}
+            {:else if markedLocally}
               <!-- RULE TWO's one literal, as its own phrase between the state and the timestamp. -->
               Reviewed · Marked locally in this session — not saved to the record ·
               {#if markedAt !== null}
@@ -136,17 +242,60 @@
     </div>
 
     {#if status === 'pending_review'}
-      <!-- 44x44 floor: this is a primary clinical action. -->
-      <Button variant="review" full class="sm:w-auto" onclick={markReviewed}
-        >Mark as reviewed</Button
-      >
+      <div class="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
+        <!-- 44x44 floor: this is a primary clinical action. -->
+        <Button
+          variant="review"
+          full
+          class="sm:w-auto"
+          disabled={writing}
+          onclick={() => markReviewed('acknowledged')}
+        >
+          {writing ? 'Recording…' : 'Mark as reviewed'}
+        </Button>
+
+        {#if promptId !== null}
+          <!-- THE OTHER THREE DISPOSITIONS, offered only where there is somewhere to record them.
+               On a source with no write endpoint these would be four buttons that all did the same
+               local thing under four different names, which is worse than one honest button.
+
+               Secondary weight on purpose: the handoff mandates ONE action here, and these are an
+               addition to it. `disabled` here means "a write is already in flight", which is rule
+               8's permitted meaning; it never stands in for missing data. -->
+          <div class="flex flex-wrap gap-2 sm:justify-end">
+            {#each SECONDARY as option (option)}
+              <Button variant="secondary" disabled={writing} onclick={() => markReviewed(option)}>
+                {SPOKEN[option].label}
+              </Button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/if}
   </div>
 
-  {#if status === 'reviewed' && markedLocally}
+  {#if writeFailure !== null}
+    <!-- STATE U-15. A named, visible failure with the reading's real state restated, because the
+         one thing a clinician must not take away from a failed write is that the patient was
+         reviewed. The row above still reads Pending review, and this says why. -->
+    <p
+      class="mt-3 rounded-sm border border-insufficient-border bg-surface px-2 py-1 text-sm"
+      role="status"
+    >
+      The review was not recorded: {writeFailure}. This reading is still awaiting review, and
+      nothing about it has changed.
+    </p>
+  {/if}
+
+  {#if status === 'reviewed' && recorded}
     <p class="mt-3 text-sm">
-      No write endpoint exists for this action. The mark lives in this browser session only and is
-      lost on reload — the persistence contract is an open question (G-08).
+      Recorded against this reading's review prompt. The service stores the disposition and the
+      time; it records no clinician, because nothing signs this action (G-46).
+    </p>
+  {:else if status === 'reviewed' && markedLocally}
+    <p class="mt-3 text-sm">
+      No write endpoint exists for this patient. The mark lives in this browser session only and is
+      lost on reload.
     </p>
   {/if}
 </section>
